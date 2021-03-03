@@ -13,22 +13,35 @@ contract AssetManager is IAssetManager, Ownable {
     struct Asset {
         address token;
         address policy;
-        uint256 riskLevel;  // 0 - low, 1 - medium, 2 - high
+        uint8 category;  // 0 - low, 1 - medium, 2 - high
+        bool deprecated;
     }
 
     Asset[] public assets;  // Every asset have a unique index.
 
-    function setAsset(uint256 index_, address token_, address policy_, uint256 riskLevel_) external onlyOwner {
+    mapping(uint8 => uint256[]) private indexesByCategory;
+
+    function setAsset(uint256 index_, address token_, address policy_, uint8 category_) external onlyOwner {
         if (index_ < assets.length) {
             assets[index_].token = token_;
             assets[index_].policy = policy_;
-            assets[index_].riskLevel = riskLevel_;
+            assets[index_].category = category_;
         } else {
             Asset memory asset;
             asset.token = token_;
             asset.policy = policy_;
-            asset.riskLevel = riskLevel_;
+            asset.category = category_;
             assets.push(asset);
+        }
+    }
+
+    function resetIndexesByCategory(uint8 category_) external {
+        delete indexesByCategory[category_];
+
+        for (uint256 i = 0; i < assets.length; ++i) {
+            if (assets[i].category == category_ && !assets[i].deprecated) {
+                indexesByCategory[category_].push(i);
+            }
         }
     }
 
@@ -44,7 +57,15 @@ contract AssetManager is IAssetManager, Ownable {
         return assets[index_].policy;
     }
 
-    function getAssetRiskLevel(uint256 index_) external override view returns(uint256) {
-        return assets[index_].riskLevel;
+    function getAssetCategory(uint256 index_) external override view returns(uint256) {
+        return assets[index_].category;
+    }
+
+    function getIndexesByCategory(uint8 category_, uint256 index_) external override view returns(uint256) {
+        return indexesByCategory[category_][index_];
+    }
+
+    function getIndexesByCategoryLength(uint8 category_) external override view returns(uint256) {
+        return indexesByCategory[category_].length;
     }
 }

@@ -30,14 +30,28 @@ contract Seller is ISeller, Ownable {
     IERC20 public tidalToken;
 
     struct WithdrawRequest {
+        uint8 category;
         uint256 amount;
         uint256 time;
+        bool executed;
     }
 
-    // who => category => amount
-    mapping(address => mapping(uint8 => WithdrawRequest[])) public withdrawRequestMap;
+    // who => WithdrawRequest[]
+    mapping(address => WithdrawRequest[]) public withdrawRequestMap;
 
-    mapping(address => mapping(uint256 => bool)) public outOfBasket;
+    mapping(address => mapping(uint256 => bool)) public isInBasket;
+
+    struct ChangeBasketRequest {
+        uint8 category;
+        uint256[] basketIndexes;
+        uint256 time;
+        bool executed;
+    }
+
+    // who => ChangeBasketRequest[]
+    mapping(address => ChangeBasketRequest[]) public changeBasketRequestMap;
+    // who => week => index
+    mapping(address => mapping(uint256 => uint256)) public changeBasketRequestIndex;
 
     struct PoolInfo {
         uint256 weekOfPremium;
@@ -156,6 +170,57 @@ contract Seller is ISeller, Ownable {
         userInfo[who_][category_].week = week;
     }
 
+    function hasIndex(uint256[] memory basketIndexes_, uint256 index) public pure returns(bool) {
+        for (uint256 i = 0; i < basketIndexes_.length; ++i) {
+            if (basketIndexes_[i] == index) return true;
+        }
+
+        return false;
+    }
+
+    function changeBasket(uint8 category_, uint256[] calldata basketIndexes_) external {
+        uint256 week = getWeekByTime(now);
+        uint256 indexPlusOne = changeBasketRequestIndex[msg.sender][week];
+
+        if (indexPlusOne > 0) {
+            ChangeBasketRequest storage existingRequest = changeBasketRequestMap[msg.sender][indexPlusOne - 1];
+            existingRequest.category = category_;
+            existingRequest.basketIndexes = basketIndexes_;
+            existingRequest.time = now;
+            existingRequest.executed = false;
+        } else {
+            ChangeBasketRequest memory request;
+            request.category = category_;
+            request.basketIndexes = basketIndexes_;
+            request.time = now;
+            request.executed = false;
+            changeBasketRequestMap[msg.sender].push(request);
+            changeBasketRequestIndex[msg.sender][week] = changeBasketRequestMap[msg.sender].length;
+        }
+    }
+
+    function changeBasketReady(uint256 requestIndex_) external {
+        ChangeBasketRequest storage request = changeBasketRequestMap[msg.sender][requestIndex_];
+
+        require(!request.executed, "already executed");
+
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(request.category, i);
+            bool existing = hasIndex(request.basketIndexes, index);
+            uint256 amount = userBalance[msg.sender][request.category];
+
+            if (isInBasket[msg.sender][index] && !existing) {
+                // Remove
+                assetBalance[index] = assetBalance[index].sub(amount);
+            } else if (!isInBasket[msg.sender][index] && existing) {
+                // Add
+                assetBalance[index] = assetBalance[index].add(amount);
+            }
+        }
+
+        request.executed = true;
+    }
+
     function deposit(uint8 category_, uint256 amount_) external {
         _updateUserPremiumAndBonus(msg.sender, category_);
 
@@ -163,7 +228,11 @@ contract Seller is ISeller, Ownable {
 
         for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
             uint256 index = assetManager.getIndexesByCategory(category_, i);
-            assetBalance[index] = assetBalance[index].add(amount_);
+
+            // Only process assets in my basket.
+            if (isInBasket[msg.sender][index]) {
+                assetBalance[index] = assetBalance[index].add(amount_);
+            }
         }
 
         userBalance[msg.sender][category_] = userBalance[msg.sender][category_].add(amount_);
@@ -176,9 +245,11 @@ contract Seller is ISeller, Ownable {
         _updateUserPremiumAndBonus(msg.sender, category_);
 
         WithdrawRequest memory request;
+        request.category = category_;
         request.amount = amount_;
         request.time = now;
-        withdrawRequestMap[msg.sender][category_].push(request);
+        request.executed = false;
+        withdrawRequestMap[msg.sender].push(request);
 
         uint256 currentWeek = getWeekByTime(now);
         uint256 nextWeek = currentWeek.add(1);
@@ -187,7 +258,7 @@ contract Seller is ISeller, Ownable {
             uint256 index = assetManager.getIndexesByCategory(category_, i);
 
             // Only process assets in my basket.
-            if (!outOfBasket[msg.sender][index]) {
+            if (isInBasket[msg.sender][index]) {
                 assetBalance[index] = assetBalance[index].sub(amount_);
                 assetLockedBalance0[index][currentWeek] = assetLockedBalance0[index][currentWeek].add(amount_);
                 assetLockedBalance1[index][nextWeek] = assetLockedBalance1[index][nextWeek].add(amount_);
@@ -201,16 +272,16 @@ contract Seller is ISeller, Ownable {
         categoryLockedBalance[category_][currentWeek] = categoryLockedBalance[category_][currentWeek].add(amount_);
     }
 
-    function withdrawReady(uint8 category_, uint256 requestIndex_) external {
-        WithdrawRequest storage request = withdrawRequestMap[msg.sender][category_][requestIndex_];
-        uint256 unlockTime = getUnlockTime(request.time);
+    function withdrawReady(uint256 requestIndex_) external {
+        WithdrawRequest storage request = withdrawRequestMap[msg.sender][requestIndex_];
+        require(!request.executed, "already executed");
 
-        require(now > request.time, "Not ready to withdraw yet");
+        uint256 unlockTime = getUnlockTime(request.time);
+        require(now > unlockTime, "Not ready to withdraw yet");
 
         IERC20(baseToken).safeTransfer(msg.sender, request.amount);
 
-        // Now remove the request, simplely set the amount to 0.
-        request.amount = 0;
+        request.executed = true;
     }
 
     function claimPremium(uint8 category_) external {
@@ -219,7 +290,7 @@ contract Seller is ISeller, Ownable {
     }
 
     function claimBonus(uint8 category_) external {
-        IERC20(baseToken).safeTransfer(msg.sender, userInfo[msg.sender][category_].bonus);
+        IERC20(tidalToken).safeTransfer(msg.sender, userInfo[msg.sender][category_].bonus);
         userInfo[msg.sender][category_].bonus = 0;
     }
 }

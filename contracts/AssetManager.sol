@@ -57,12 +57,12 @@ contract AssetManager is IAssetManager, Ownable {
         return assets[index_].policy;
     }
 
-    function getAssetCategory(uint256 index_) external override view returns(uint256) {
+    function getAssetCategory(uint256 index_) external override view returns(uint8) {
         return assets[index_].category;
     }
 
-    function getIndexesByCategory(uint8 category_, uint256 index_) external override view returns(uint256) {
-        return indexesByCategory[category_][index_];
+    function getIndexesByCategory(uint8 category_, uint256 categoryIndex_) external override view returns(uint256) {
+        return indexesByCategory[category_][categoryIndex_];
     }
 
     function getIndexesByCategoryLength(uint8 category_) external override view returns(uint256) {

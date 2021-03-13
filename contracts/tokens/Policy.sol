@@ -27,7 +27,7 @@ contract Policy is Context, IERC20, IPolicy, Ownable {
     string private _symbol;
 
     uint256 public assetIndex;
-    uint256 public riskLevel;
+    uint256 public category;
 
     // The computing ability of EVM is limited, so we cap the maximum number of weeks
     // in computing at 100. If the gap is larger, just compute multiple times.
@@ -47,13 +47,13 @@ contract Policy is Context, IERC20, IPolicy, Ownable {
         string memory name_,
         string memory symbol_,
         uint256 assetIndex_,
-        uint256 riskLevel_,
+        uint8 category_,
         IBuyer buyer_
     ) public  {
         _name = name_;
         _symbol = symbol_;
         assetIndex = assetIndex_;
-        riskLevel = riskLevel_;
+        category = category_;
         buyer = buyer_;
     }
 
@@ -67,6 +67,13 @@ contract Policy is Context, IERC20, IPolicy, Ownable {
     }
 
     function getPremiumRate(uint256 week_) public view returns(uint256) {
+        if (category == 0) {
+            return 14000;
+        } else if (category == 1) {
+            return 56000;
+        } else {
+            return 108000;
+        }
     }
 
     function update() public returns(bool) {

@@ -64,6 +64,7 @@ contract Seller is ISeller, Ownable {
 
     struct UserInfo {
         uint256 week;
+        uint256 balance;
         uint256 premium;
         uint256 bonus;
         uint256 accPremiumPerShare;
@@ -72,25 +73,28 @@ contract Seller is ISeller, Ownable {
 
     mapping(address => mapping(uint8 => UserInfo)) public userInfo;
 
-    // By user.
-    mapping(address => mapping(uint8 => uint256)) public userBalance;
-    mapping(address => mapping(uint8 => mapping(uint256 => uint256))) userLockedBalance;
-
     // By category.
     mapping(uint8 => uint256) public categoryBalance;
-    mapping(uint8 => mapping(uint256 => uint256)) public categoryLockedBalance;
 
-    // Balance here not withdrawn yet, and are good for staking bonus.
     // assetIndex => amount
     mapping(uint256 => uint256) public assetBalance;
 
-    // Balance here are to be withdrawn, but are still good for staking bonus.
-    // assetIndex => week => amount
-    mapping(uint256 => mapping(uint256 => uint256)) public assetLockedBalance0;
+    struct PayoutInfo {
+        address toAddress;
+        uint256 total;
+        uint256 unitPerShare;
+        uint256 paid;
+        bool finished;
+    }
 
-    // Balance here are not good for staking bonus.
-    // assetIndex => week => amount
-    mapping(uint256 => mapping(uint256 => uint256)) public assetLockedBalance1;
+    // payoutId => PayoutInfo
+    mapping(uint256 => PayoutInfo) public payoutInfo;
+
+    // assetIndex => payoutId
+    mapping(uint256 => uint256) public payoutIdMap;
+
+    // who => assetIndex => payoutId
+    mapping(address => mapping(uint256 => uint256)) userPayoutIdMap;
 
     constructor (IBuyer buyer_, IAssetManager assetManager_, IERC20 baseToken_, IERC20 tidalToken_) public {
         buyer = buyer_;
@@ -103,42 +107,32 @@ contract Seller is ISeller, Ownable {
         return time_ / (7 days);
     }
 
-    function getUnlockTime(uint256 time_) public pure returns(uint256) {
+    function getChangeBasketTime(uint256 time_) public pure returns(uint256) {
+        return (time_ / (7 days) + 1) * (7 days);
+    }
+
+    function getWithdrawTime(uint256 time_) public pure returns(uint256) {
         return (time_ / (7 days) + 2) * (7 days);
     }
 
-    function getUserEffectiveBalance(address who, uint8 category_, uint256 week_) public view returns(uint256) {
-        return userBalance[who][category_] + userLockedBalance[who][category_][week_];
-    }
-
-    function getCategoryEffectiveBalance(uint8 category_, uint256 week_) public view returns(uint256) {
-        return categoryBalance[category_] + categoryLockedBalance[category_][week_];
-    }
-
-    function getBackedAssetBalance(uint8 assetIndex_, uint256 week_) public view returns(uint256) {
-        return assetBalance[assetIndex_] + assetLockedBalance0[assetIndex_][week_] + assetLockedBalance1[assetIndex_][week_];
-    }
-
-    // Update and pay last week's premium.
+    // Update and pay last week's premium. Buyer will call.
     function updatePremium(uint8 category_, uint256 amount_) external {
         uint256 week = getWeekByTime(now).sub(1);
 
         IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
-        uint256 categoryEffectiveBalance = getCategoryEffectiveBalance(category_, week);
         poolInfo[category_].accPremiumPerShare = poolInfo[category_].accPremiumPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(categoryEffectiveBalance));
+            amount_.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
 
         poolInfo[category_].weekOfPremium = week;
     }
 
-    // Update and pay last week's bonus.
+    // Update and pay last week's bonus. Buyer will call.
     function updateBonus(uint8 category_, uint256 amount_) external {
         uint256 week = getWeekByTime(now).sub(1);
 
         IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
-        uint256 categoryEffectiveBalance = getCategoryEffectiveBalance(category_, week);
         poolInfo[category_].accBonusPerShare = poolInfo[category_].accBonusPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(categoryEffectiveBalance));
+            amount_.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
 
         poolInfo[category_].weekOfBonus = week;
     }
@@ -154,15 +148,15 @@ contract Seller is ISeller, Ownable {
             return;
         }
 
-        uint256 userEffectiveBalance = getUserEffectiveBalance(who_, category_, week);
+        uint256 userBalance = userInfo[who_][category_].balance;
 
         // Update premium.
-        userInfo[who_][category_].premium = userInfo[who_][category_].premium.add(userEffectiveBalance.mul(
+        userInfo[who_][category_].premium = userInfo[who_][category_].premium.add(userBalance.mul(
             poolInfo[category_].accPremiumPerShare.sub(userInfo[who_][category_].accPremiumPerShare)).div(UNIT_PER_SHARE));
         userInfo[who_][category_].accPremiumPerShare = poolInfo[category_].accPremiumPerShare;
 
         // Update bonus.
-        userInfo[who_][category_].bonus = userInfo[who_][category_].bonus.add(userEffectiveBalance.mul(
+        userInfo[who_][category_].bonus = userInfo[who_][category_].bonus.add(userBalance.mul(
             poolInfo[category_].accBonusPerShare.sub(userInfo[who_][category_].accBonusPerShare)).div(UNIT_PER_SHARE));
         userInfo[who_][category_].accBonusPerShare = poolInfo[category_].accBonusPerShare;
 
@@ -170,15 +164,40 @@ contract Seller is ISeller, Ownable {
         userInfo[who_][category_].week = week;
     }
 
-    function hasIndex(uint256[] memory basketIndexes_, uint256 index) public pure returns(bool) {
+    function isAssetLocked(address who_, uint8 category_) public view returns(bool) {
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(category_, i);
+            uint256 payoutId = payoutIdMap[index];
+
+            if (payoutId > 0 && !payoutInfo[payoutId].finished &&
+                isInBasket[who_][index] && userPayoutIdMap[who_][index] < payoutId) return true;
+        }
+
+        return false;
+    }
+
+    function hasPendingPayout(uint256[] memory basketIndexes_) public view returns(bool) {
         for (uint256 i = 0; i < basketIndexes_.length; ++i) {
-            if (basketIndexes_[i] == index) return true;
+            uint256 assetIndex = basketIndexes_[i];
+            uint256 payoutId = payoutIdMap[assetIndex];
+            if (payoutId > 0 && !payoutInfo[payoutId].finished) return true;
+        }
+
+        return false;
+    }
+
+    function hasIndex(uint256[] memory basketIndexes_, uint256 index_) public pure returns(bool) {
+        for (uint256 i = 0; i < basketIndexes_.length; ++i) {
+            if (basketIndexes_[i] == index_) return true;
         }
 
         return false;
     }
 
     function changeBasket(uint8 category_, uint256[] calldata basketIndexes_) external {
+        require(!isAssetLocked(msg.sender, category_), "Asset locked");
+        require(!hasPendingPayout(basketIndexes_), "Has pending payout");
+
         uint256 week = getWeekByTime(now);
         uint256 indexPlusOne = changeBasketRequestIndex[msg.sender][week];
 
@@ -199,20 +218,26 @@ contract Seller is ISeller, Ownable {
         }
     }
 
-    function changeBasketReady(uint256 requestIndex_) external {
-        ChangeBasketRequest storage request = changeBasketRequestMap[msg.sender][requestIndex_];
+    function changeBasketReady(address who_, uint256 requestIndex_) external {
+        ChangeBasketRequest storage request = changeBasketRequestMap[who_][requestIndex_];
+
+        require(!isAssetLocked(who_, request.category), "Asset locked");
+        require(!hasPendingPayout(request.basketIndexes), "Has pending Payout");
 
         require(!request.executed, "already executed");
+
+        uint256 unlockTime = getChangeBasketTime(request.time);
+        require(now > unlockTime, "Not ready to change basket yet");
 
         for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
             uint256 index = assetManager.getIndexesByCategory(request.category, i);
             bool existing = hasIndex(request.basketIndexes, index);
-            uint256 amount = userBalance[msg.sender][request.category];
+            uint256 amount = userInfo[who_][request.category].balance;
 
-            if (isInBasket[msg.sender][index] && !existing) {
+            if (isInBasket[who_][index] && !existing) {
                 // Remove
                 assetBalance[index] = assetBalance[index].sub(amount);
-            } else if (!isInBasket[msg.sender][index] && existing) {
+            } else if (!isInBasket[who_][index] && existing) {
                 // Add
                 assetBalance[index] = assetBalance[index].add(amount);
             }
@@ -222,6 +247,8 @@ contract Seller is ISeller, Ownable {
     }
 
     function deposit(uint8 category_, uint256 amount_) external {
+        require(!isAssetLocked(msg.sender, category_), "Asset locked");
+
         _updateUserPremiumAndBonus(msg.sender, category_);
 
         IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
@@ -235,12 +262,14 @@ contract Seller is ISeller, Ownable {
             }
         }
 
-        userBalance[msg.sender][category_] = userBalance[msg.sender][category_].add(amount_);
+        userInfo[msg.sender][category_].balance = userInfo[msg.sender][category_].balance.add(amount_);
     }
 
     function withdraw(uint8 category_, uint256 amount_) external {
+        require(!isAssetLocked(msg.sender, category_), "Asset locked");
+
         require(amount_ > 0, "Requires positive amount");
-        require(amount_ <= userBalance[msg.sender][category_], "Not enough user balance");
+        require(amount_ <= userInfo[msg.sender][category_].balance, "Not enough user balance");
 
         _updateUserPremiumAndBonus(msg.sender, category_);
 
@@ -250,37 +279,31 @@ contract Seller is ISeller, Ownable {
         request.time = now;
         request.executed = false;
         withdrawRequestMap[msg.sender].push(request);
+    }
 
-        uint256 currentWeek = getWeekByTime(now);
-        uint256 nextWeek = currentWeek.add(1);
+    function withdrawReady(address who_, uint256 requestIndex_) external {
+        WithdrawRequest storage request = withdrawRequestMap[who_][requestIndex_];
 
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-            uint256 index = assetManager.getIndexesByCategory(category_, i);
+        require(!isAssetLocked(who_, request.category), "Asset locked");
+        require(!request.executed, "already executed");
+
+        uint256 unlockTime = getWithdrawTime(request.time);
+        require(now > unlockTime, "Not ready to withdraw yet");
+
+        IERC20(baseToken).safeTransfer(who_, request.amount);
+
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(request.category, i);
 
             // Only process assets in my basket.
-            if (isInBasket[msg.sender][index]) {
-                assetBalance[index] = assetBalance[index].sub(amount_);
-                assetLockedBalance0[index][currentWeek] = assetLockedBalance0[index][currentWeek].add(amount_);
-                assetLockedBalance1[index][nextWeek] = assetLockedBalance1[index][nextWeek].add(amount_);
+            if (isInBasket[who_][index]) {
+                assetBalance[index] = assetBalance[index].sub(request.amount);
             }
         }
 
-        userBalance[msg.sender][category_] = userBalance[msg.sender][category_].sub(amount_);
-        userLockedBalance[msg.sender][category_][currentWeek] = userLockedBalance[msg.sender][category_][currentWeek].add(amount_);
-
-        categoryBalance[category_] = categoryBalance[category_].sub(amount_);
-        categoryLockedBalance[category_][currentWeek] = categoryLockedBalance[category_][currentWeek].add(amount_);
-    }
-
-    function withdrawReady(uint256 requestIndex_) external {
-        WithdrawRequest storage request = withdrawRequestMap[msg.sender][requestIndex_];
-        require(!request.executed, "already executed");
-
-        uint256 unlockTime = getUnlockTime(request.time);
-        require(now > unlockTime, "Not ready to withdraw yet");
-
-        IERC20(baseToken).safeTransfer(msg.sender, request.amount);
-
+        userInfo[who_][request.category].balance = userInfo[who_][request.category].balance.sub(request.amount);
+        categoryBalance[request.category] = categoryBalance[request.category].sub(request.amount);
+ 
         request.executed = true;
     }
 
@@ -292,5 +315,56 @@ contract Seller is ISeller, Ownable {
     function claimBonus(uint8 category_) external {
         IERC20(tidalToken).safeTransfer(msg.sender, userInfo[msg.sender][category_].bonus);
         userInfo[msg.sender][category_].bonus = 0;
+    }
+
+    function startPayout(uint256 assetIndex_, uint256 payoutId_) external onlyOwner {
+        require(payoutId_ == payoutIdMap[assetIndex_] + 1, "payoutId should be increasing");
+        payoutIdMap[assetIndex_] = payoutId_;
+    }
+
+    function setPayout(uint256 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external onlyOwner {
+        require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
+        require(payoutInfo[payoutId_].total == 0, "already set");
+        require(total_ <= assetBalance[assetIndex_], "More than asset");
+
+        payoutInfo[payoutId_].toAddress = toAddress_;
+        payoutInfo[payoutId_].total = total_;
+        payoutInfo[payoutId_].unitPerShare = total_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+        payoutInfo[payoutId_].paid = 0;
+        payoutInfo[payoutId_].finished = false;
+    }
+
+    function doPayout(address who_, uint256 assetIndex_) external {
+        require(isInBasket[who_][assetIndex_], "must be in basket");
+
+        for (uint256 payoutId = userPayoutIdMap[who_][assetIndex_] + 1; payoutId <= payoutIdMap[assetIndex_]; ++payoutId) {
+            userPayoutIdMap[who_][assetIndex_] = payoutId;
+
+            if (payoutInfo[payoutId].finished) {
+                continue;
+            }
+
+            uint8 category = assetManager.getAssetCategory(assetIndex_);
+            uint256 amountToPay = userInfo[who_][category].balance.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
+
+            userInfo[who_][category].balance = userInfo[who_][category].balance.sub(amountToPay);
+            categoryBalance[category] = categoryBalance[category].sub(amountToPay);
+            assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
+            payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
+        }
+    }
+
+    function finishPayout(uint256 payoutId_) external {
+        require(!payoutInfo[payoutId_].finished, "already finished");
+
+        if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {
+            // In case there is still small error.
+            IERC20(baseToken).safeTransferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
+            payoutInfo[payoutId_].paid = payoutInfo[payoutId_].total;
+        }
+
+        IERC20(baseToken).safeTransfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
+
+        payoutInfo[payoutId_].finished = true;
     }
 }

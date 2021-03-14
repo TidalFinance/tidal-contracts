@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBuyer.sol";
+import "./interfaces/ISeller.sol";
 import "./interfaces/IPolicy.sol";
 
 
@@ -26,22 +27,25 @@ contract Buyer is IBuyer, Ownable {
 
     IERC20 public baseToken;  // By default it's USDC
     IAssetManager public assetManager;
+    ISeller public seller;
 
     struct UserInfo {
         uint256 balance;
-        uint256 weekCovered;  // The week that the use was last covered
+        uint256 weekBegin;  // The week the coverage begin
+        uint256 weekEnd;  // The week the coverage end
         uint256 weekUpdated;  // The week that balance was updated
     }
 
     mapping(address => UserInfo) public userInfoMap;
 
-    // Tracks user's current covered amount of each asset.
-    // user => assetIndex => coveredAmount
-    mapping(address => mapping(uint256 => uint256)) public override currentCoveredAmount;
+    // user => assetIndex => amount
+    mapping(address => mapping(uint256 => uint256)) public override currentSubscription;
 
-    address[] public currentBuyers;
-    // indices + 1
-    mapping(address => uint256) public currentBuyerIndices;
+    // user => assetIndex => amount
+    mapping(address => mapping(uint256 => uint256)) public override futureSubscription;
+
+    // week => assetIndex => total
+    mapping(uint256 => mapping(uint256 => uint256)) public weeklyTotalSubscription;
 
     constructor (IERC20 baseToken_, IAssetManager assetManager_) public {
         baseToken = baseToken_;
@@ -56,113 +60,68 @@ contract Buyer is IBuyer, Ownable {
         assetManager = assetManager_;
     }
 
-    function _insertBuyer(address buyer_) internal {
-        uint256 indexPlusOne = currentBuyerIndices[buyer_];
-        if (indexPlusOne > 0) {
-            currentBuyers[indexPlusOne - 1] = buyer_;
+    function setSeller(ISeller seller_) public onlyOwner {
+        seller = seller_;
+    }
+
+    function getPremiumRate(uint8 category_, uint256 week_) public view returns(uint256) {
+        if (category_ == 0) {
+            return 14000;
+        } else if (category_ == 1) {
+            return 56000;
         } else {
-            currentBuyers.push(buyer_);
-            currentBuyerIndices[buyer_] = currentBuyers.length;
+            return 108000;
         }
     }
 
-    function _removeBuyer(address buyer_) internal {
-        uint256 indexPlusOne = currentBuyerIndices[buyer_];
-        if (indexPlusOne > 0) {
-            currentBuyers[indexPlusOne - 1] = currentBuyers[currentBuyers.length - 1];
-            currentBuyerIndices[currentBuyers[indexPlusOne - 1]] = indexPlusOne;
-            currentBuyerIndices[buyer_] = 0;
-            currentBuyers.pop();
-        }
+    function getCurrentWeek() public view returns(uint256) {
+        return now.div(7 days);
     }
 
-    function getAccPremium(address who_, uint256 _week) public view returns(uint256) {
+    function isUserCovered(address who_) public override view returns(bool) {
+        return userInfoMap[who_].weekEnd == getCurrentWeek();
+    }
+
+    function getTotalFutureSubscription(address who_) public view returns(uint256) {
         uint256 total = 0;
         for (uint256 i = 0; i < assetManager.getAssetLength(); ++i) {
-            if (currentCoveredAmount[who_][i] > 0) {
-                uint256 costPerShare = IPolicy(assetManager.getAssetPolicy(i)).accWeeklyCost(_week);
-
-                require(costPerShare > 0, "Policy not up to date");
-
-                total = total.add(costPerShare.mul(currentCoveredAmount[who_][i]).div(PREMIUM_BASE));
+            if (futureSubscription[who_][i] > 0) {
+                total = total.add(futureSubscription[who_][i]);
             }
         }
 
         return total;
     }
 
-    function findWeekCovered(address who_) public override view returns(uint256, uint256) {
-        if (userInfoMap[who_].weekUpdated == 0) {
-            return (0, 0);
-        }
-
-        uint256 left = userInfoMap[who_].weekUpdated;
-        uint256 right = now.div(7 days);
-        uint256 leftAccPremium = getAccPremium(who_, left);
-        uint256 initialAccPremium = leftAccPremium;
-        uint256 rightAccPremium = getAccPremium(who_, right);
-
-        if (rightAccPremium.sub(initialAccPremium) <= userInfoMap[who_].balance) {
-            return (right, rightAccPremium);
-        }
-
-        for (uint256 i = 0; ; ++i) {
-            require(i < 100, "2^100 weeks from now? Earth will explode.");
-
-            if (left >= right) {
-                break;
-            }
-
-            uint256 mid = (left + right).div(2);
-            uint256 midAccPremium = getAccPremium(who_, mid);
-
-            if (midAccPremium.sub(initialAccPremium) > userInfoMap[who_].balance) {
-                right = mid;
-                rightAccPremium = midAccPremium;
-            } else {
-                left = mid;
-                leftAccPremium = midAccPremium;
-            }
-        }
-
-        return (left, leftAccPremium);
+    function getBalance(address who_) public view returns(uint256) {
+        return userInfoMap[who_].balance;
     }
 
-    // This function may time out if someone didn't operate for long enough.
-    function getRealBalance(address who_) public view returns(uint256) {
-        if (userInfoMap[who_].weekUpdated == 0) {
-            return userInfoMap[who_].balance;
-        }
-
-        (, uint256 lastAccPremium) = findWeekCovered(who_);
-        uint256 cost = lastAccPremium.sub(getAccPremium(who_, userInfoMap[who_].weekUpdated));
-        require(userInfoMap[who_].balance >= cost, "not enough balance");
-
-        return userInfoMap[who_].balance.sub(cost);
-    }
-
+    // Called for every user every week.
     function update(address who_) public {
-        if (userInfoMap[who_].weekUpdated == 0) {
-            userInfoMap[who_].weekUpdated = now.div(7 days);
-            return;
+        uint256 currentWeek = getCurrentWeek();
+        uint256 cost = getTotalFutureSubscription(who_);
+
+        if (userInfoMap[who_].balance >= cost) {
+            userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
+
+            if (userInfoMap[who_].weekBegin == 0 ||
+                    userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
+                userInfoMap[who_].weekBegin = currentWeek;
+            }
+
+            userInfoMap[who_].weekEnd = currentWeek;
+
+            for (uint256 i = 0; i < assetManager.getAssetLength(); ++i) {
+                if (futureSubscription[who_][i] > 0) {
+                    currentSubscription[who_][i] = futureSubscription[who_][i];
+                    weeklyTotalSubscription[currentWeek][i] =
+                        weeklyTotalSubscription[currentWeek][i].add(futureSubscription[who_][i]);
+                }
+            }
         }
-
-        (uint256 lastWeekCovered, uint256 lastAccPremium) = findWeekCovered(who_);
-        uint256 cost = lastAccPremium.sub(getAccPremium(who_, userInfoMap[who_].weekUpdated));
-        require(userInfoMap[who_].balance >= cost, "not enough balance");
-
-        userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
-        userInfoMap[who_].weekCovered = lastWeekCovered;
-        userInfoMap[who_].weekUpdated = now.div(7 days);  // This week.
-
-        if (userInfoMap[who_].weekCovered == userInfoMap[who_].weekUpdated) {
-            _insertBuyer(msg.sender);
-        } else {
-            _removeBuyer(msg.sender);
-        }
-    }
-
-    function processAllBuyers() public {
+        
+        userInfoMap[who_].weekUpdated = currentWeek;  // This week.
     }
 
     // Deposit
@@ -183,10 +142,10 @@ contract Buyer is IBuyer, Ownable {
     }
 
     function subscribe(uint256 assetIndex_, uint256 amount_) external {
-        currentCoveredAmount[msg.sender][assetIndex_] = currentCoveredAmount[msg.sender][assetIndex_].add(amount_);
+        futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].add(amount_);
     }
 
     function unsubscribe(uint256 assetIndex_, uint256 amount_) external {
-        currentCoveredAmount[msg.sender][assetIndex_] = currentCoveredAmount[msg.sender][assetIndex_].sub(amount_);
+        futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].sub(amount_);
     }
 }

@@ -117,6 +117,8 @@ contract Buyer is IBuyer, Ownable {
                     currentSubscription[who_][i] = futureSubscription[who_][i];
                     weeklyTotalSubscription[currentWeek][i] =
                         weeklyTotalSubscription[currentWeek][i].add(futureSubscription[who_][i]);
+                } else if (currentSubscription[who_][i] > 0) {
+                    currentSubscription[who_][i] = 0;
                 }
             }
         }

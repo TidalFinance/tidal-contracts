@@ -22,6 +22,9 @@ contract Buyer is IBuyer, Ownable {
     // The base of percentage.
     uint256 constant PERCENTAGE_BASE = 100;
 
+    // The base of utilization.
+    uint256 constant UTILIZATION_BASE = 1e6;
+
     // The base of premium rate and accWeeklyCost
     uint256 constant PREMIUM_BASE = 1e6;
 
@@ -46,8 +49,11 @@ contract Buyer is IBuyer, Ownable {
     // user => assetIndex => amount
     mapping(address => mapping(uint256 => uint256)) public override futureSubscription;
 
-    // week => assetIndex => total
-    mapping(uint256 => mapping(uint256 => uint256)) public weeklyTotalSubscription;
+    // assetIndex => total
+    mapping(uint256 => uint256) public assetSubscription;
+
+    // assetIndex => utilization
+    mapping(uint256 => uint256) public assetUtilization;
 
     // assetIndex => total
     mapping(uint256 => uint256) public override premiumForGuarantor;
@@ -80,13 +86,23 @@ contract Buyer is IBuyer, Ownable {
         guarantorPercentage = percentage_;
     }
 
-    function getPremiumRate(uint8 category_, uint256 week_) public view returns(uint256) {
-        if (category_ == 0) {
-            return 14000;
-        } else if (category_ == 1) {
-            return 56000;
+    function getPremiumRate(uint256 assetIndex_) public view returns(uint256) {
+        uint8 category = assetManager.getAssetCategory(assetIndex_);
+        uint256 extra;
+        uint256 cap = UTILIZATION_BASE * 8 / 10;  // 80%
+
+        if (assetUtilization[assetIndex_] >= cap) {
+            extra = 30000;
         } else {
-            return 108000;
+            extra = 30000 * assetUtilization[assetIndex_] / cap;
+        }
+
+        if (category == 0) {
+            return 14000 + extra;
+        } else if (category == 1) {
+            return 56000 + extra;
+        } else {
+            return 108000 + extra;
         }
     }
 
@@ -98,11 +114,11 @@ contract Buyer is IBuyer, Ownable {
         return userInfoMap[who_].weekEnd == getCurrentWeek();
     }
 
-    function getTotalFutureSubscription(address who_) public view returns(uint256) {
+    function getTotalFuturePremium(address who_) public view returns(uint256) {
         uint256 total = 0;
-        for (uint256 i = 0; i < assetManager.getAssetLength(); ++i) {
-            if (futureSubscription[who_][i] > 0) {
-                total = total.add(futureSubscription[who_][i]);
+        for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
+            if (futureSubscription[who_][index] > 0) {
+                total = total.add(futureSubscription[who_][index].mul(getPremiumRate(index)).div(PREMIUM_BASE));
             }
         }
 
@@ -111,6 +127,20 @@ contract Buyer is IBuyer, Ownable {
 
     function getBalance(address who_) public view returns(uint256) {
         return userInfoMap[who_].balance;
+    }
+
+    function getUtilization(uint256 assetIndex_) public view returns(uint256) {
+        uint256 sellerAssetBalance = seller.assetBalance(assetIndex_);
+
+        if (sellerAssetBalance == 0) {
+            return 0;
+        }
+
+        if (assetSubscription[assetIndex_] > sellerAssetBalance) {
+            return UTILIZATION_BASE;
+        }
+
+        return assetSubscription[assetIndex_] * UTILIZATION_BASE / sellerAssetBalance;
     }
 
     // Called every week.
@@ -132,12 +162,21 @@ contract Buyer is IBuyer, Ownable {
             // To preserve last week's data before update buyers.
             for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
                 category = assetManager.getAssetCategory(index);
-                premiumForGuarantor[index] = weeklyTotalSubscription[weekToUpdate][index] * guarantorPercentage / PERCENTAGE_BASE;
+                uint256 premiumOfAsset = assetSubscription[index] * 
+                    getPremiumRate(index) / PREMIUM_BASE;
+
+                premiumForGuarantor[index] = premiumOfAsset * guarantorPercentage / PERCENTAGE_BASE;
                 totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
 
-                uint256 deltaForCategory = weeklyTotalSubscription[weekToUpdate][index] * (PERCENTAGE_BASE - guarantorPercentage) / PERCENTAGE_BASE;
+                uint256 deltaForCategory = premiumOfAsset * (PERCENTAGE_BASE - guarantorPercentage) / PERCENTAGE_BASE;
                 premiumForSeller[category] = premiumForSeller[category].add(deltaForCategory);
                 totalForSeller = totalForSeller.add(deltaForCategory);
+
+                // Calculate assetUtilization from assetSubscription and seller.assetBalance
+                assetUtilization[index] = getUtilization(index);
+
+                // Now reset assetSubscription[index], because its useless.
+                assetSubscription[index] = 0;
             }
 
             IERC20(baseToken).approve(address(guarantor), totalForGuarantor);
@@ -153,7 +192,8 @@ contract Buyer is IBuyer, Ownable {
 
         require(currentWeek == weekToUpdate, "Not ready to update");
 
-        uint256 cost = getTotalFutureSubscription(who_);
+        // Get per user premium
+        uint256 cost = getTotalFuturePremium(who_);
 
         if (userInfoMap[who_].balance >= cost) {
             userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
@@ -168,8 +208,10 @@ contract Buyer is IBuyer, Ownable {
             for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
                 if (futureSubscription[who_][index] > 0) {
                     currentSubscription[who_][index] = futureSubscription[who_][index];
-                    weeklyTotalSubscription[currentWeek][index] =
-                        weeklyTotalSubscription[currentWeek][index].add(futureSubscription[who_][index]);
+
+                    // Update per asset premium
+                    assetSubscription[index] = assetSubscription[index].add(
+                            futureSubscription[who_][index]);
                 } else if (currentSubscription[who_][index] > 0) {
                     currentSubscription[who_][index] = 0;
                 }

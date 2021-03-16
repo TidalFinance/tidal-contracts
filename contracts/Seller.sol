@@ -67,7 +67,7 @@ contract Seller is ISeller, Ownable {
     mapping(uint8 => uint256) public categoryBalance;
 
     // assetIndex => amount
-    mapping(uint256 => uint256) public assetBalance;
+    mapping(uint256 => uint256) public override assetBalance;
 
     struct PayoutInfo {
         address toAddress;

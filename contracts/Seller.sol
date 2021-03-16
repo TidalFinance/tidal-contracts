@@ -101,18 +101,22 @@ contract Seller is ISeller, Ownable {
         return (time_ / (7 days) + 2) * (7 days);
     }
 
-    // Update and pay last week's premium. Buyer will call.
-    function updatePremium(uint8 category_, uint256 amount_) external {
+    // Update and pay last week's premium.
+    function updatePremium(uint8 category_) external {
         uint256 week = getWeekByTime(now);
+        require(buyer.weekToUpdate() == week, "buyer not ready");
+        require(poolInfo[category_].weekOfPremium < week, "already updated");
 
-        IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
+        uint256 amount = buyer.premiumForSeller(category_);
+
+        IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
         poolInfo[category_].accPremiumPerShare = poolInfo[category_].accPremiumPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
+            amount.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
 
         poolInfo[category_].weekOfPremium = week;
     }
 
-    // Update and pay last week's bonus. Buyer will call.
+    // Update and pay last week's bonus.
     function updateBonus(uint8 category_, uint256 amount_) external {
         uint256 week = getWeekByTime(now);
 

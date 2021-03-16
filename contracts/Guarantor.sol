@@ -97,12 +97,16 @@ contract Guarantor is IGuarantor, Ownable {
     }
 
     // Update and pay last week's premium.
-    function updatePremium(uint256 assetIndex_, uint256 amount_) external {
+    function updatePremium(uint256 assetIndex_) external {
         uint256 week = getWeekByTime(now);
+        require(buyer.weekToUpdate() == week, "buyer not ready");
+        require(poolInfo[assetIndex_].weekOfPremium < week, "already updated");
 
-        IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
+        uint256 amount = buyer.premiumForGuarantor(assetIndex_);
+
+        IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
         poolInfo[assetIndex_].accPremiumPerShare = poolInfo[assetIndex_].accPremiumPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]));
+            amount.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]));
 
         poolInfo[assetIndex_].weekOfPremium = week;
     }

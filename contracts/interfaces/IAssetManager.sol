@@ -2,6 +2,7 @@
 pragma solidity 0.6.12;
 
 interface IAssetManager {
+    function getCategoryLength() external view returns(uint8);
     function getAssetLength() external view returns(uint256);
     function getAssetToken(uint256 index_) external view returns(address);
     function getAssetPolicy(uint256 index_) external view returns(address);

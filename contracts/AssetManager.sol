@@ -45,6 +45,10 @@ contract AssetManager is IAssetManager, Ownable {
         }
     }
 
+    function getCategoryLength() external override view returns(uint8) {
+        return 3;  // May update in the future.
+    }
+
     function getAssetLength() external override view returns(uint256) {
         return assets.length;
     }

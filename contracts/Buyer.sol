@@ -7,10 +7,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./interfaces/IAssetManager.sol";
+import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
 import "./interfaces/ISeller.sol";
-import "./interfaces/IPolicy.sol";
 
 
 // This contract is owned by Timelock.
@@ -28,17 +28,32 @@ contract Buyer is IBuyer, Ownable {
     // The base of premium rate and accWeeklyCost
     uint256 constant PREMIUM_BASE = 1e6;
 
+    // For improving precision of bonusPerShare.
+    uint256 constant UNIT_PER_SHARE = 1e18;
+
     IERC20 public baseToken;  // By default it's USDC
+    IERC20 public tidalToken;
+
     IAssetManager public assetManager;
+    IBonus public bonus;
     IGuarantor public guarantor;
     ISeller public seller;
     uint256 public guarantorPercentage = 10;  // 10%
+
+    struct PoolInfo {
+        uint256 weekOfBonus;
+        uint256 bonusPerShare;
+    }
+
+    // assetIndex => PoolInfo
+    mapping(uint256 => PoolInfo) public poolInfo;
 
     struct UserInfo {
         uint256 balance;
         uint256 weekBegin;  // The week the coverage begin
         uint256 weekEnd;  // The week the coverage end
         uint256 weekUpdated;  // The week that balance was updated
+        uint256 bonus;
     }
 
     mapping(address => UserInfo) public userInfoMap;
@@ -65,23 +80,31 @@ contract Buyer is IBuyer, Ownable {
 
     constructor () public { }
 
-    function setBaseToken(IERC20 baseToken_) public onlyOwner {
+    function setBaseToken(IERC20 baseToken_) external onlyOwner {
         baseToken = baseToken_;
     }
 
-    function setAssetManager(IAssetManager assetManager_) public onlyOwner {
+    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
+        tidalToken = tidalToken_;
+    }
+
+    function setAssetManager(IAssetManager assetManager_) external onlyOwner {
         assetManager = assetManager_;
     }
 
-    function setSeller(ISeller seller_) public onlyOwner {
+    function setBonus(IBonus bonus_) external onlyOwner {
+        bonus = bonus_;
+    }
+
+    function setSeller(ISeller seller_) external onlyOwner {
         seller = seller_;
     }
 
-    function setGuarantor(IGuarantor guarantor_) public onlyOwner {
+    function setGuarantor(IGuarantor guarantor_) external onlyOwner {
         guarantor = guarantor_;
     }
 
-    function setGuarantorPercentage(uint256 percentage_) public onlyOwner {
+    function setGuarantorPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         guarantorPercentage = percentage_;
     }
@@ -174,9 +197,6 @@ contract Buyer is IBuyer, Ownable {
 
                 // Calculate assetUtilization from assetSubscription and seller.assetBalance
                 assetUtilization[index] = getUtilization(index);
-
-                // Now reset assetSubscription[index], because its useless.
-                assetSubscription[index] = 0;
             }
 
             IERC20(baseToken).approve(address(guarantor), totalForGuarantor);
@@ -186,17 +206,49 @@ contract Buyer is IBuyer, Ownable {
         weekToUpdate = currentWeek;
     }
 
+    // Update and pay last week's bonus.
+    function updateBonus(uint256 assetIndex_, uint256 amount_) external override {
+        require(msg.sender == address(bonus), "Only Bonus can call");
+
+        uint256 currentWeek = getCurrentWeek();
+
+        require(currentWeek == weekToUpdate, "Not ready to update");
+        require(poolInfo[assetIndex_].weekOfBonus < currentWeek, "already updated");
+
+        if (assetSubscription[assetIndex_] > 0) {
+            IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
+            poolInfo[assetIndex_].bonusPerShare = amount_.mul(UNIT_PER_SHARE).div(assetSubscription[assetIndex_]);
+        }
+
+        poolInfo[assetIndex_].weekOfBonus = currentWeek;
+
+        // HACK: Now reset, because it's useless and we will re-sum it later.
+        assetSubscription[assetIndex_] = 0;
+    }
+
     // Called for every user every week.
     function update(address who_) public {
         uint256 currentWeek = getCurrentWeek();
 
         require(currentWeek == weekToUpdate, "Not ready to update");
+        require(userInfoMap[who_].weekUpdated < currentWeek, "Already updated");
+
+        uint256 index;
+
+        // Check bonus.
+        for (index = 0; index < assetManager.getAssetLength(); ++index) {
+            require(poolInfo[index].weekOfBonus == currentWeek, "Not ready");
+        }
 
         // Get per user premium
         uint256 cost = getTotalFuturePremium(who_);
 
         if (userInfoMap[who_].balance >= cost) {
             userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
+
+            // Update user bonus.
+            userInfoMap[who_].bonus = userInfoMap[who_].bonus.add(currentSubscription[who_][index].mul(
+                poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
 
             if (userInfoMap[who_].weekBegin == 0 ||
                     userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
@@ -205,7 +257,7 @@ contract Buyer is IBuyer, Ownable {
 
             userInfoMap[who_].weekEnd = currentWeek;
 
-            for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
+            for (index = 0; index < assetManager.getAssetLength(); ++index) {
                 if (futureSubscription[who_][index] > 0) {
                     currentSubscription[who_][index] = futureSubscription[who_][index];
 
@@ -217,7 +269,7 @@ contract Buyer is IBuyer, Ownable {
                 }
             }
         }
-        
+
         userInfoMap[who_].weekUpdated = currentWeek;  // This week.
     }
 
@@ -244,5 +296,10 @@ contract Buyer is IBuyer, Ownable {
 
     function unsubscribe(uint256 assetIndex_, uint256 amount_) external {
         futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].sub(amount_);
+    }
+
+    function claimBonus() external {
+        IERC20(tidalToken).safeTransfer(msg.sender, userInfoMap[msg.sender].bonus);
+        userInfoMap[msg.sender].bonus = 0;
     }
 }

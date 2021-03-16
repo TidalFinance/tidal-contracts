@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./interfaces/IAssetManager.sol";
+import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/ISeller.sol";
 
@@ -21,9 +22,10 @@ contract Seller is ISeller, Ownable {
     // at 100. If the gap is larger, just compute multiple times.
     uint256 constant MAXIMUM_ITERATION = 100;
 
-    // For improving precision of accPremiumPerShare and accBonusPerShare.
+    // For improving precision of premiumPerShare and bonusPerShare.
     uint256 constant UNIT_PER_SHARE = 1e18;
 
+    IBonus public bonus;
     IBuyer public buyer;
     IAssetManager public assetManager;
     IERC20 public baseToken;  // By default it's USDC
@@ -45,8 +47,8 @@ contract Seller is ISeller, Ownable {
     struct PoolInfo {
         uint256 weekOfPremium;
         uint256 weekOfBonus;
-        uint256 accPremiumPerShare;
-        uint256 accBonusPerShare;
+        uint256 premiumPerShare;
+        uint256 bonusPerShare;
     }
 
     mapping(uint8 => PoolInfo) public poolInfo;
@@ -57,8 +59,6 @@ contract Seller is ISeller, Ownable {
         uint256 futureBalance;
         uint256 premium;
         uint256 bonus;
-        uint256 accPremiumPerShare;
-        uint256 accBonusPerShare;
     }
 
     mapping(address => mapping(uint8 => UserInfo)) public userInfo;
@@ -86,11 +86,26 @@ contract Seller is ISeller, Ownable {
     // who => assetIndex => payoutId
     mapping(address => mapping(uint256 => uint256)) userPayoutIdMap;
 
-    constructor (IBuyer buyer_, IAssetManager assetManager_, IERC20 baseToken_, IERC20 tidalToken_) public {
-        buyer = buyer_;
-        assetManager = assetManager_;
+    constructor () public { }
+
+    function setBaseToken(IERC20 baseToken_) external onlyOwner {
         baseToken = baseToken_;
+    }
+
+    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
         tidalToken = tidalToken_;
+    }
+
+    function setAssetManager(IAssetManager assetManager_) external onlyOwner {
+        assetManager = assetManager_;
+    }
+
+    function setBuyer(IBuyer buyer_) external onlyOwner {
+        buyer = buyer_;
+    }
+
+    function setBonus(IBonus bonus_) external onlyOwner {
+        bonus = bonus_;
     }
 
     function getWeekByTime(uint256 time_) public pure returns(uint256) {
@@ -109,20 +124,28 @@ contract Seller is ISeller, Ownable {
 
         uint256 amount = buyer.premiumForSeller(category_);
 
-        IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
-        poolInfo[category_].accPremiumPerShare = poolInfo[category_].accPremiumPerShare.add(
-            amount.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
+        if (categoryBalance[category_] > 0) {
+            IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
+            poolInfo[category_].premiumPerShare =
+                amount.mul(UNIT_PER_SHARE).div(categoryBalance[category_]);
+        }
 
         poolInfo[category_].weekOfPremium = week;
     }
 
     // Update and pay last week's bonus.
-    function updateBonus(uint8 category_, uint256 amount_) external {
+    function updateBonus(uint8 category_, uint256 amount_) external override {
+        require(msg.sender == address(bonus), "Only Bonus can call");
+
         uint256 week = getWeekByTime(now);
 
-        IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
-        poolInfo[category_].accBonusPerShare = poolInfo[category_].accBonusPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(categoryBalance[category_]));
+        require(poolInfo[category_].weekOfBonus < week, "already updated");
+
+        if (categoryBalance[category_] > 0) {
+            IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
+            poolInfo[category_].bonusPerShare =
+                amount_.mul(UNIT_PER_SHARE).div(categoryBalance[category_]);
+        }
 
         poolInfo[category_].weekOfBonus = week;
     }
@@ -179,8 +202,8 @@ contract Seller is ISeller, Ownable {
         uint256 week = getWeekByTime(now);
 
         // Return if premium or bonus not updated, or user already updated.
-        if (userInfo[who_][category_].week > poolInfo[category_].weekOfPremium ||
-                userInfo[who_][category_].week > poolInfo[category_].weekOfBonus ||
+        if (poolInfo[category_].weekOfPremium < week ||
+                poolInfo[category_].weekOfBonus < week ||
                 userInfo[who_][category_].week >= week) {
             return;
         }
@@ -190,13 +213,11 @@ contract Seller is ISeller, Ownable {
 
         // Update premium.
         userInfo[who_][category_].premium = userInfo[who_][category_].premium.add(currentBalance.mul(
-            poolInfo[category_].accPremiumPerShare.sub(userInfo[who_][category_].accPremiumPerShare)).div(UNIT_PER_SHARE));
-        userInfo[who_][category_].accPremiumPerShare = poolInfo[category_].accPremiumPerShare;
+            poolInfo[category_].premiumPerShare).div(UNIT_PER_SHARE));
 
         // Update bonus.
         userInfo[who_][category_].bonus = userInfo[who_][category_].bonus.add(currentBalance.mul(
-            poolInfo[category_].accBonusPerShare.sub(userInfo[who_][category_].accBonusPerShare)).div(UNIT_PER_SHARE));
-        userInfo[who_][category_].accBonusPerShare = poolInfo[category_].accBonusPerShare;
+            poolInfo[category_].bonusPerShare).div(UNIT_PER_SHARE));
 
         // Update balances and baskets if no claims.
         if (!isAssetLocked(who_, category_)) {

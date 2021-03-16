@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./interfaces/IAssetManager.sol";
+import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
 
@@ -21,9 +22,10 @@ contract Guarantor is IGuarantor, Ownable {
     // at 100. If the gap is larger, just compute multiple times.
     uint256 constant MAXIMUM_ITERATION = 100;
 
-    // For improving precision of accPremiumPerShare and accBonusPerShare.
+    // For improving precision of premiumPerShare and bonusPerShare.
     uint256 constant UNIT_PER_SHARE = 1e18;
 
+    IBonus public bonus;
     IBuyer public buyer;
     IAssetManager public assetManager;
     IERC20 public baseToken;  // By default it's USDC
@@ -42,23 +44,26 @@ contract Guarantor is IGuarantor, Ownable {
     struct PoolInfo {
         uint256 weekOfPremium;
         uint256 weekOfBonus;
-        uint256 accPremiumPerShare;
-        uint256 accBonusPerShare;
+        uint256 premiumPerShare;
+        uint256 bonusPerShare;
     }
 
     mapping(uint256 => PoolInfo) public poolInfo;
 
-    struct UserInfo {
-        uint256 week;
+    struct UserBalance {
         uint256 currentBalance;
         uint256 futureBalance;
-        uint256 premium;
-        uint256 bonus;
-        uint256 accPremiumPerShare;
-        uint256 accBonusPerShare;
     }
 
-    mapping(address => mapping(uint256 => UserInfo)) public userInfo;
+    mapping(address => mapping(uint256 => UserBalance)) public userBalance;
+
+    struct UserInfo {
+        uint256 week;
+        uint256 premium;
+        uint256 bonus;
+    }
+
+    mapping(address => UserInfo) public userInfo;
 
     // Balance here not withdrawn yet, and are good for staking bonus.
     // assetIndex => amount
@@ -81,11 +86,26 @@ contract Guarantor is IGuarantor, Ownable {
     // who => assetIndex => payoutId
     mapping(address => mapping(uint256 => uint256)) userPayoutIdMap;
 
-    constructor (IBuyer buyer_, IAssetManager assetManager_, IERC20 baseToken_, IERC20 tidalToken_) public {
-        buyer = buyer_;
-        assetManager = assetManager_;
+    constructor () public { }
+
+    function setBaseToken(IERC20 baseToken_) external onlyOwner {
         baseToken = baseToken_;
+    }
+
+    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
         tidalToken = tidalToken_;
+    }
+
+    function setAssetManager(IAssetManager assetManager_) external onlyOwner {
+        assetManager = assetManager_;
+    }
+
+    function setBuyer(IBuyer buyer_) external onlyOwner {
+        buyer = buyer_;
+    }
+
+    function setBonus(IBonus bonus_) external onlyOwner {
+        bonus = bonus_;
     }
 
     function getWeekByTime(uint256 time_) public pure returns(uint256) {
@@ -104,56 +124,67 @@ contract Guarantor is IGuarantor, Ownable {
 
         uint256 amount = buyer.premiumForGuarantor(assetIndex_);
 
-        IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
-        poolInfo[assetIndex_].accPremiumPerShare = poolInfo[assetIndex_].accPremiumPerShare.add(
-            amount.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]));
+        if (assetBalance[assetIndex_] > 0) {
+            IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
+            poolInfo[assetIndex_].premiumPerShare =
+                amount.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+        }
 
         poolInfo[assetIndex_].weekOfPremium = week;
     }
 
     // Update and pay last week's bonus.
-    function updateBonus(uint256 assetIndex_, uint256 amount_) external {
+    function updateBonus(uint256 assetIndex_, uint256 amount_) external override {
+        require(msg.sender == address(bonus), "Only Bonus can call");
+
         uint256 week = getWeekByTime(now);
 
-        IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
-        poolInfo[assetIndex_].accBonusPerShare = poolInfo[assetIndex_].accBonusPerShare.add(
-            amount_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]));
+        require(poolInfo[assetIndex_].weekOfBonus < week, "already updated");
+
+        if (assetBalance[assetIndex_] > 0) {
+            IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
+            poolInfo[assetIndex_].bonusPerShare =
+                amount_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+        }
 
         poolInfo[assetIndex_].weekOfBonus = week;
     }
 
-    // Called for every user every week for every asset.
-    function update(address who_, uint256 assetIndex_) private {
+    // Called for every user every week.
+    function update(address who_) private {
         uint256 week = getWeekByTime(now);
 
-        // Return if premium or bonus not updated, or user already updated.
-        if (userInfo[who_][assetIndex_].week > poolInfo[assetIndex_].weekOfPremium ||
-                userInfo[who_][assetIndex_].week > poolInfo[assetIndex_].weekOfBonus ||
-                userInfo[who_][assetIndex_].week >= week) {
-            return;
+        require(userInfo[who_].week < week, "Already updated");
+
+        uint256 index;
+        // Assert if premium or bonus not updated, or user already updated.
+        for (index = 0; index < assetManager.getAssetLength(); ++index) {
+            require(poolInfo[index].weekOfPremium == week &&
+                poolInfo[index].weekOfBonus == week, "Not ready");
         }
 
-        uint256 currentBalance = userInfo[who_][assetIndex_].currentBalance;
-        uint256 futureBalance = userInfo[who_][assetIndex_].futureBalance;
+        // For every asset
+        for (index = 0; index < assetManager.getAssetLength(); ++index) {
+            uint256 currentBalance = userBalance[who_][index].currentBalance;
+            uint256 futureBalance = userBalance[who_][index].futureBalance;
 
-        // Update premium.
-        userInfo[who_][assetIndex_].premium = userInfo[who_][assetIndex_].premium.add(currentBalance.mul(
-            poolInfo[assetIndex_].accPremiumPerShare.sub(userInfo[who_][assetIndex_].accPremiumPerShare)).div(UNIT_PER_SHARE));
-        userInfo[who_][assetIndex_].accPremiumPerShare = poolInfo[assetIndex_].accPremiumPerShare;
+            // Update premium.
+            userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
+                poolInfo[index].premiumPerShare).div(UNIT_PER_SHARE));
 
-        // Update bonus.
-        userInfo[who_][assetIndex_].bonus = userInfo[who_][assetIndex_].bonus.add(currentBalance.mul(
-            poolInfo[assetIndex_].accBonusPerShare.sub(userInfo[who_][assetIndex_].accBonusPerShare)).div(UNIT_PER_SHARE));
-        userInfo[who_][assetIndex_].accBonusPerShare = poolInfo[assetIndex_].accBonusPerShare;
+            // Update bonus.
+            userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
+                poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
 
-        // Update balances and baskets if no claims.
-        if (!isAssetLocked(who_, assetIndex_)) {
-            assetBalance[assetIndex_] = assetBalance[assetIndex_].add(futureBalance).sub(currentBalance);
-            userInfo[who_][assetIndex_].currentBalance = futureBalance;
+            // Update balances and baskets if no claims.
+            if (!isAssetLocked(who_, index)) {
+                assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
+                userBalance[who_][index].currentBalance = futureBalance;
+            }
         }
 
         // Update week.
-        userInfo[who_][assetIndex_].week = week;
+        userInfo[who_].week = week;
     }
 
     function isAssetLocked(address who_, uint256 assetIndex_) public view returns(bool) {
@@ -168,19 +199,19 @@ contract Guarantor is IGuarantor, Ownable {
 
     function deposit(uint256 assetIndex_, uint256 amount_) external {
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
-        require(userInfo[msg.sender][assetIndex_].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[msg.sender].week == getWeekByTime(now), "Not updated yet");
 
         address token = assetManager.getAssetToken(assetIndex_);
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount_);
 
-        userInfo[msg.sender][assetIndex_].futureBalance = userInfo[msg.sender][assetIndex_].futureBalance.add(amount_);
+        userBalance[msg.sender][assetIndex_].futureBalance = userBalance[msg.sender][assetIndex_].futureBalance.add(amount_);
     }
 
     function withdraw(uint256 assetIndex_, uint256 amount_) external {
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
 
         require(amount_ > 0, "Requires positive amount");
-        require(amount_ <= userInfo[msg.sender][assetIndex_].currentBalance, "Not enough user balance");
+        require(amount_ <= userBalance[msg.sender][assetIndex_].currentBalance, "Not enough user balance");
 
         WithdrawRequest memory request;
         request.assetIndex = assetIndex_;
@@ -194,7 +225,7 @@ contract Guarantor is IGuarantor, Ownable {
         WithdrawRequest storage request = withdrawRequestMap[msg.sender][requestIndex_];
 
         require(!hasPendingPayout(request.assetIndex), "Has pending payout");
-        require(userInfo[who_][request.assetIndex].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[who_].week == getWeekByTime(now), "Not updated yet");
         require(!request.executed, "already executed");
 
         uint256 unlockTime = getWithdrawTime(request.time);
@@ -205,20 +236,20 @@ contract Guarantor is IGuarantor, Ownable {
         IERC20(token).safeTransfer(msg.sender, request.amount);
 
         assetBalance[request.assetIndex] = assetBalance[request.assetIndex].sub(request.amount);
-        userInfo[who_][request.assetIndex].currentBalance = userInfo[who_][request.assetIndex].currentBalance.sub(request.amount);
-        userInfo[who_][request.assetIndex].futureBalance = userInfo[who_][request.assetIndex].futureBalance.sub(request.amount);
+        userBalance[who_][request.assetIndex].currentBalance = userBalance[who_][request.assetIndex].currentBalance.sub(request.amount);
+        userBalance[who_][request.assetIndex].futureBalance = userBalance[who_][request.assetIndex].futureBalance.sub(request.amount);
 
         request.executed = true;
     }
 
-    function claimPremium(uint256 assetIndex_) external {
-        IERC20(baseToken).safeTransfer(msg.sender, userInfo[msg.sender][assetIndex_].premium);
-        userInfo[msg.sender][assetIndex_].premium = 0;
+    function claimPremium() external {
+        IERC20(baseToken).safeTransfer(msg.sender, userInfo[msg.sender].premium);
+        userInfo[msg.sender].premium = 0;
     }
 
-    function claimBonus(uint256 assetIndex_) external {
-        IERC20(tidalToken).safeTransfer(msg.sender, userInfo[msg.sender][assetIndex_].bonus);
-        userInfo[msg.sender][assetIndex_].bonus = 0;
+    function claimBonus() external {
+        IERC20(tidalToken).safeTransfer(msg.sender, userInfo[msg.sender].bonus);
+        userInfo[msg.sender].bonus = 0;
     }
 
     function startPayout(uint256 assetIndex_, uint256 payoutId_) external onlyOwner {
@@ -246,10 +277,10 @@ contract Guarantor is IGuarantor, Ownable {
                 continue;
             }
 
-            uint256 amountToPay = userInfo[who_][assetIndex_].currentBalance.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
+            uint256 amountToPay = userBalance[who_][assetIndex_].currentBalance.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
 
-            userInfo[who_][assetIndex_].currentBalance = userInfo[who_][assetIndex_].currentBalance.sub(amountToPay);
-            userInfo[who_][assetIndex_].futureBalance = userInfo[who_][assetIndex_].futureBalance.sub(amountToPay);
+            userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(amountToPay);
+            userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(amountToPay);
             assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
             payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
         }

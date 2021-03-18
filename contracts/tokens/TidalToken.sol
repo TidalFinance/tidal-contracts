@@ -13,11 +13,4 @@ contract TidalToken is ERC20("Tidal Token", "TIL") {
     function burn(uint256 _amount) external {
         _burn(_msgSender(), _amount);
     }
-
-    function burnFrom(address account, uint256 amount) external {
-        uint256 currentAllowance = allowance(account, _msgSender());
-        require(currentAllowance >= amount, "ERC20: burn amount exceeds allowance");
-        _approve(account, _msgSender(), currentAllowance - amount);
-        _burn(account, amount);
-    }
 }

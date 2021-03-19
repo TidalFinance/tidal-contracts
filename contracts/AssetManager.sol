@@ -57,7 +57,7 @@ contract AssetManager is IAssetManager, Ownable {
         return assets[index_].category;
     }
 
-    function getAssetDeprecated(uint256 index_) external override view returns(uint8) {
+    function getAssetDeprecated(uint256 index_) external override view returns(bool) {
         return assets[index_].deprecated;
     }
 

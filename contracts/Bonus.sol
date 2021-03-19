@@ -24,6 +24,10 @@ contract Bonus is IBonus, Ownable {
     uint256 public bonusPerCategoryOfS = 10000e18;
     uint256 public bonusPerAssetOfB = 1000e18;
 
+    uint256 public buyerWeek;
+    uint256 public sellerWeek;
+    uint256 public guarantorWeek;
+
     constructor () public { }
 
     function setTidalToken(IERC20 tidalToken_) external onlyOwner {
@@ -54,18 +58,37 @@ contract Bonus is IBonus, Ownable {
         bonusPerAssetOfB = value_;
     }
 
+    function getCurrentWeek() public view returns(uint256) {
+        return now / (7 days);
+    }
+
     function updateBuyerBonus(uint256 assetIndex_) external {
+        uint256 currentWeek = getCurrentWeek();
+        require(buyerWeek < currentWeek, "Already updated");
+
         tidalToken.approve(address(buyer), bonusPerAssetOfB);
         buyer.updateBonus(assetIndex_, bonusPerAssetOfB);
+
+        buyerWeek = currentWeek;
     }
 
     function updateSellerBonus(uint8 category_) external {
+        uint256 currentWeek = getCurrentWeek();
+        require(sellerWeek < currentWeek, "Already updated");
+
         tidalToken.approve(address(seller), bonusPerCategoryOfS);
         seller.updateBonus(category_, bonusPerCategoryOfS);
+
+        sellerWeek = currentWeek;
     }
 
     function updateGuarantorBonus(uint256 assetIndex_) external {
+        uint256 currentWeek = getCurrentWeek();
+        require(guarantorWeek < currentWeek, "Already updated");
+
         tidalToken.approve(address(guarantor), bonusPerAssetOfB);
         guarantor.updateBonus(assetIndex_, bonusPerAssetOfG);
+
+        guarantorWeek = currentWeek;
     }
 }

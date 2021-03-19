@@ -151,7 +151,7 @@ contract Guarantor is IGuarantor, Ownable {
     }
 
     // Called for every user every week.
-    function update(address who_) private {
+    function update(address who_) external {
         uint256 week = getWeekByTime(now);
 
         require(userInfo[who_].week < week, "Already updated");

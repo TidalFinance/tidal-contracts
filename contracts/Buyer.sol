@@ -275,16 +275,12 @@ contract Buyer is IBuyer, Ownable {
 
     // Deposit
     function deposit(uint256 amount_) external {
-        update(msg.sender);
-
         baseToken.safeTransferFrom(msg.sender, address(this), amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
     }
 
     // Withdraw
     function withdraw(uint256 amount_) external {
-        update(msg.sender);
-
         require(userInfoMap[msg.sender].balance > amount_, "not enough balance");
         baseToken.safeTransfer(msg.sender, amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);

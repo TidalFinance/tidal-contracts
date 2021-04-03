@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import "./WeekManaged.sol";
+
 import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
@@ -12,7 +14,7 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Bonus is IBonus, Ownable {
+contract Bonus is IBonus, Ownable, WeekManaged {
 
     IERC20 public tidalToken;
 
@@ -24,9 +26,12 @@ contract Bonus is IBonus, Ownable {
     uint256 public bonusPerCategoryOfS = 10000e18;
     uint256 public bonusPerAssetOfB = 1000e18;
 
-    uint256 public buyerWeek;
-    uint256 public sellerWeek;
-    uint256 public guarantorWeek;
+    // assetIndex => week
+    mapping(uint256 => uint256) public buyerWeek;
+    // category => week
+    mapping(uint8 => uint256) public sellerWeek;
+    // assetIndex => week
+    mapping(uint256 => uint256) public guarantorWeek;
 
     constructor () public { }
 
@@ -58,37 +63,33 @@ contract Bonus is IBonus, Ownable {
         bonusPerAssetOfB = value_;
     }
 
-    function getCurrentWeek() public view returns(uint256) {
-        return now / (7 days);
-    }
-
     function updateBuyerBonus(uint256 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
-        require(buyerWeek < currentWeek, "Already updated");
+        require(buyerWeek[assetIndex_] < currentWeek, "Already updated");
 
         tidalToken.approve(address(buyer), bonusPerAssetOfB);
         buyer.updateBonus(assetIndex_, bonusPerAssetOfB);
 
-        buyerWeek = currentWeek;
+        buyerWeek[assetIndex_] = currentWeek;
     }
 
     function updateSellerBonus(uint8 category_) external {
         uint256 currentWeek = getCurrentWeek();
-        require(sellerWeek < currentWeek, "Already updated");
+        require(sellerWeek[category_] < currentWeek, "Already updated");
 
         tidalToken.approve(address(seller), bonusPerCategoryOfS);
         seller.updateBonus(category_, bonusPerCategoryOfS);
 
-        sellerWeek = currentWeek;
+        sellerWeek[category_] = currentWeek;
     }
 
     function updateGuarantorBonus(uint256 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
-        require(guarantorWeek < currentWeek, "Already updated");
+        require(guarantorWeek[assetIndex_] < currentWeek, "Already updated");
 
         tidalToken.approve(address(guarantor), bonusPerAssetOfB);
         guarantor.updateBonus(assetIndex_, bonusPerAssetOfG);
 
-        guarantorWeek = currentWeek;
+        guarantorWeek[assetIndex_] = currentWeek;
     }
 }

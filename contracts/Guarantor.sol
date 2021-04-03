@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./WeekManaged.sol";
+
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
@@ -13,7 +15,7 @@ import "./interfaces/IGuarantor.sol";
 
 
 // This contract is owned by Timelock.
-contract Guarantor is IGuarantor, Ownable {
+contract Guarantor is IGuarantor, Ownable, WeekManaged {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -108,17 +110,9 @@ contract Guarantor is IGuarantor, Ownable {
         bonus = bonus_;
     }
 
-    function getWeekByTime(uint256 time_) public pure returns(uint256) {
-        return time_ / (7 days);
-    }
-
-    function getWithdrawTime(uint256 time_) public pure returns(uint256) {
-        return (time_ / (7 days) + 2) * (7 days);
-    }
-
     // Update and pay last week's premium.
     function updatePremium(uint256 assetIndex_) external {
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
         require(buyer.weekToUpdate() == week, "buyer not ready");
         require(poolInfo[assetIndex_].weekOfPremium < week, "already updated");
 
@@ -137,7 +131,7 @@ contract Guarantor is IGuarantor, Ownable {
     function updateBonus(uint256 assetIndex_, uint256 amount_) external override {
         require(msg.sender == address(bonus), "Only Bonus can call");
 
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
 
         require(poolInfo[assetIndex_].weekOfBonus < week, "already updated");
 
@@ -152,7 +146,7 @@ contract Guarantor is IGuarantor, Ownable {
 
     // Called for every user every week.
     function update(address who_) external {
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
 
         require(userInfo[who_].week < week, "Already updated");
 
@@ -199,7 +193,7 @@ contract Guarantor is IGuarantor, Ownable {
 
     function deposit(uint256 assetIndex_, uint256 amount_) external {
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
-        require(userInfo[msg.sender].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
 
         address token = assetManager.getAssetToken(assetIndex_);
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount_);
@@ -216,7 +210,7 @@ contract Guarantor is IGuarantor, Ownable {
         WithdrawRequest memory request;
         request.assetIndex = assetIndex_;
         request.amount = amount_;
-        request.time = now;
+        request.time = getNow();
         request.executed = false;
         withdrawRequestMap[msg.sender].push(request);
     }
@@ -225,12 +219,12 @@ contract Guarantor is IGuarantor, Ownable {
         WithdrawRequest storage request = withdrawRequestMap[msg.sender][requestIndex_];
 
         require(!hasPendingPayout(request.assetIndex), "Has pending payout");
-        require(userInfo[who_].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
 
-        uint256 unlockTime = getWithdrawTime(request.time);
+        uint256 unlockTime = getUnlockTime(request.time);
 
-        require(now > unlockTime, "Not ready to withdraw yet");
+        require(getNow() > unlockTime, "Not ready to withdraw yet");
 
         address token = assetManager.getAssetToken(request.assetIndex);
         IERC20(token).safeTransfer(msg.sender, request.amount);

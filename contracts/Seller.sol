@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./WeekManaged.sol";
+
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
@@ -13,7 +15,7 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Seller is ISeller, Ownable {
+contract Seller is ISeller, Ownable, WeekManaged {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -38,11 +40,20 @@ contract Seller is ISeller, Ownable {
         bool executed;
     }
 
-    // who => WithdrawRequest[]
-    mapping(address => WithdrawRequest[]) public withdrawRequestMap;
+    // who => week => WithdrawRequest
+    mapping(address => mapping(uint256 => WithdrawRequest)) public withdrawRequestMap;
 
-    mapping(address => mapping(uint256 => bool)) public currentBasket;
-    mapping(address => mapping(uint256 => bool)) public futureBasket;
+    mapping(address => mapping(uint256 => bool)) public userBasket;
+
+    struct BasketRequest {
+        uint8 category;
+        uint256[] assetIndexes;
+        uint256 time;
+        bool executed;
+    }
+
+    // who => week => BasketRequest
+    mapping(address => mapping(uint256 => BasketRequest)) basketRequestMap;
 
     struct PoolInfo {
         uint256 weekOfPremium;
@@ -108,17 +119,9 @@ contract Seller is ISeller, Ownable {
         bonus = bonus_;
     }
 
-    function getWeekByTime(uint256 time_) public pure returns(uint256) {
-        return time_ / (7 days);
-    }
-
-    function getWithdrawTime(uint256 time_) public pure returns(uint256) {
-        return (time_ / (7 days) + 2) * (7 days);
-    }
-
     // Update and pay last week's premium.
     function updatePremium(uint8 category_) external {
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
         require(buyer.weekToUpdate() == week, "buyer not ready");
         require(poolInfo[category_].weekOfPremium < week, "already updated");
 
@@ -137,7 +140,7 @@ contract Seller is ISeller, Ownable {
     function updateBonus(uint8 category_, uint256 amount_) external override {
         require(msg.sender == address(bonus), "Only Bonus can call");
 
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
 
         require(poolInfo[category_].weekOfBonus < week, "already updated");
 
@@ -156,7 +159,7 @@ contract Seller is ISeller, Ownable {
             uint256 payoutId = payoutIdMap[index];
 
             if (payoutId > 0 && !payoutInfo[payoutId].finished &&
-                currentBasket[who_][index] && userPayoutIdMap[who_][index] < payoutId) return true;
+                userBasket[who_][index] && userPayoutIdMap[who_][index] < payoutId) return true;
         }
 
         return false;
@@ -184,22 +187,68 @@ contract Seller is ISeller, Ownable {
         require(!isAssetLocked(msg.sender, category_), "Asset locked");
         require(!hasPendingPayout(basketIndexes_), "Has pending payout");
 
-        uint256 i;
+        if (userInfo[msg.sender][category_].currentBalance == 0) {
+            // Change now.
 
-        for (i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-            uint256 index = assetManager.getIndexesByCategory(category_, i);
-            futureBasket[msg.sender][index] = false;
+            for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
+                uint256 index = assetManager.getIndexesByCategory(category_, i);
+                bool has = hasIndex(basketIndexes_, index);
+
+                if (has && !userBasket[msg.sender][index]) {
+                    userBasket[msg.sender][index] = true;
+                } else if (!has && userBasket[msg.sender][index]) {
+                    userBasket[msg.sender][index] = false;
+                }
+            }
+        } else {
+            // Change later.
+
+            BasketRequest memory request;
+            request.category = category_;
+            request.assetIndexes = basketIndexes_;
+            request.time = getNow();
+            request.executed = false;
+
+            // One request per week.
+            basketRequestMap[msg.sender][getUnlockWeek()] = request;
+        }
+    }
+
+    function changeBasketReady(address who_) external {
+        BasketRequest storage request = basketRequestMap[who_][getCurrentWeek()];
+
+        require(!isAssetLocked(who_, request.category), "Asset locked");
+        require(userInfo[who_][request.category].week == getCurrentWeek(), "Not updated yet");
+        require(!request.executed, "already executed");
+        require(request.time > 0, "No request");
+
+        uint256 unlockTime = getUnlockTime(request.time);
+        require(getNow() > unlockTime, "Not ready to change yet");
+
+        uint256 currentBalance = userInfo[who_][request.category].currentBalance;
+
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(request.category, i);
+            bool has = hasIndex(request.assetIndexes, index);
+
+            if (has && !userBasket[msg.sender][index]) {
+                userBasket[msg.sender][index] = true;
+                assetBalance[index] = assetBalance[index].add(
+                    currentBalance);
+            } else if (!has && userBasket[msg.sender][index]) {
+                userBasket[msg.sender][index] = false;
+                assetBalance[index] = assetBalance[index].sub(
+                    currentBalance);
+            }
         }
 
-        for (i = 0; i < basketIndexes_.length; ++i) {
-            futureBasket[msg.sender][basketIndexes_[i]] = true;
-        }
+        request.executed = true;
     }
 
     // Called for every user every week for every category.
     function update(address who_, uint8 category_) public {
         // Update user's last week's premium and bonus.
-        uint256 week = getWeekByTime(now);
+        uint256 week = getCurrentWeek();
 
         // Return if premium or bonus not updated, or user already updated.
         if (poolInfo[category_].weekOfPremium < week ||
@@ -224,11 +273,10 @@ contract Seller is ISeller, Ownable {
             for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
                 uint256 index = assetManager.getIndexesByCategory(category_, i);
 
-                assetBalance[index] = assetBalance[index].add(
-                    futureBasket[who_][index] ? futureBalance : 0).sub(
-                    currentBasket[who_][index] ? currentBalance : 0);
-
-                currentBasket[who_][index] = futureBasket[who_][index];
+                if (userBasket[who_][index]) {
+                    assetBalance[index] = assetBalance[index].add(
+                        futureBalance).sub(currentBalance);
+                }
             }
 
             categoryBalance[category_] = categoryBalance[category_].add(
@@ -243,7 +291,7 @@ contract Seller is ISeller, Ownable {
 
     function deposit(uint8 category_, uint256 amount_) external {
         require(!isAssetLocked(msg.sender, category_), "Asset locked");
-        require(userInfo[msg.sender][category_].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[msg.sender][category_].week == getCurrentWeek(), "Not updated yet");
 
         IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
 
@@ -259,20 +307,21 @@ contract Seller is ISeller, Ownable {
         WithdrawRequest memory request;
         request.category = category_;
         request.amount = amount_;
-        request.time = now;
+        request.time = getNow();
         request.executed = false;
-        withdrawRequestMap[msg.sender].push(request);
+        withdrawRequestMap[msg.sender][getUnlockWeek()] = request;
     }
 
-    function withdrawReady(address who_, uint256 requestIndex_) external {
-        WithdrawRequest storage request = withdrawRequestMap[who_][requestIndex_];
+    function withdrawReady(address who_) external {
+        WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()];
 
         require(!isAssetLocked(who_, request.category), "Asset locked");
-        require(userInfo[who_][request.category].week == getWeekByTime(now), "Not updated yet");
+        require(userInfo[who_][request.category].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
+        require(request.time > 0, "No request");
 
-        uint256 unlockTime = getWithdrawTime(request.time);
-        require(now > unlockTime, "Not ready to withdraw yet");
+        uint256 unlockTime = getUnlockTime(request.time);
+        require(getNow() > unlockTime, "Not ready to withdraw yet");
 
         IERC20(baseToken).safeTransfer(who_, request.amount);
 
@@ -280,7 +329,7 @@ contract Seller is ISeller, Ownable {
             uint256 index = assetManager.getIndexesByCategory(request.category, i);
 
             // Only process assets in my basket.
-            if (currentBasket[who_][index]) {
+            if (userBasket[who_][index]) {
                 assetBalance[index] = assetBalance[index].sub(request.amount);
             }
         }
@@ -320,7 +369,7 @@ contract Seller is ISeller, Ownable {
     }
 
     function doPayout(address who_, uint256 assetIndex_) external {
-        require(currentBasket[who_][assetIndex_], "must be in basket");
+        require(userBasket[who_][assetIndex_], "must be in basket");
 
         for (uint256 payoutId = userPayoutIdMap[who_][assetIndex_] + 1; payoutId <= payoutIdMap[assetIndex_]; ++payoutId) {
             userPayoutIdMap[who_][assetIndex_] = payoutId;

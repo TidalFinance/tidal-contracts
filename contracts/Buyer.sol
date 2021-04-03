@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./WeekManaged.sol";
+
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
@@ -14,7 +16,7 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Buyer is IBuyer, Ownable {
+contract Buyer is IBuyer, Ownable, WeekManaged {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -127,10 +129,6 @@ contract Buyer is IBuyer, Ownable {
         } else {
             return 108000 + extra;
         }
-    }
-
-    function getCurrentWeek() public view returns(uint256) {
-        return now.div(7 days);
     }
 
     function isUserCovered(address who_) public override view returns(bool) {

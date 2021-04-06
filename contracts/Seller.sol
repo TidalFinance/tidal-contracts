@@ -34,26 +34,24 @@ contract Seller is ISeller, Ownable, WeekManaged {
     IERC20 public tidalToken;
 
     struct WithdrawRequest {
-        uint8 category;
         uint256 amount;
         uint256 time;
         bool executed;
     }
 
-    // who => week => WithdrawRequest
-    mapping(address => mapping(uint256 => WithdrawRequest)) public withdrawRequestMap;
+    // who => week => category => WithdrawRequest
+    mapping(address => mapping(uint256 => mapping(uint8 => WithdrawRequest))) public withdrawRequestMap;
 
     mapping(address => mapping(uint256 => bool)) public userBasket;
 
     struct BasketRequest {
-        uint8 category;
         uint256[] assetIndexes;
         uint256 time;
         bool executed;
     }
 
-    // who => week => BasketRequest
-    mapping(address => mapping(uint256 => BasketRequest)) basketRequestMap;
+    // who => week => category => BasketRequest
+    mapping(address => mapping(uint256 => mapping(uint8 => BasketRequest))) public basketRequestMap;
 
     struct PoolInfo {
         uint256 weekOfPremium;
@@ -185,6 +183,7 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
     function changeBasket(uint8 category_, uint256[] calldata basketIndexes_) external {
         require(!isAssetLocked(msg.sender, category_), "Asset locked");
+        require(userInfo[msg.sender][category_].week == getCurrentWeek(), "Not updated yet");
         require(!hasPendingPayout(basketIndexes_), "Has pending payout");
 
         if (userInfo[msg.sender][category_].currentBalance == 0) {
@@ -204,31 +203,30 @@ contract Seller is ISeller, Ownable, WeekManaged {
             // Change later.
 
             BasketRequest memory request;
-            request.category = category_;
             request.assetIndexes = basketIndexes_;
             request.time = getNow();
             request.executed = false;
 
-            // One request per week.
-            basketRequestMap[msg.sender][getUnlockWeek()] = request;
+            // One request per week per category.
+            basketRequestMap[msg.sender][getUnlockWeek()][category_] = request;
         }
     }
 
-    function changeBasketReady(address who_) external {
-        BasketRequest storage request = basketRequestMap[who_][getCurrentWeek()];
+    function changeBasketReady(address who_, uint8 category_) external {
+        BasketRequest storage request = basketRequestMap[who_][getCurrentWeek()][category_];
 
-        require(!isAssetLocked(who_, request.category), "Asset locked");
-        require(userInfo[who_][request.category].week == getCurrentWeek(), "Not updated yet");
+        require(!isAssetLocked(who_, category_), "Asset locked");
+        require(userInfo[who_][category_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
         require(request.time > 0, "No request");
 
         uint256 unlockTime = getUnlockTime(request.time);
         require(getNow() > unlockTime, "Not ready to change yet");
 
-        uint256 currentBalance = userInfo[who_][request.category].currentBalance;
+        uint256 currentBalance = userInfo[who_][category_].currentBalance;
 
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
-            uint256 index = assetManager.getIndexesByCategory(request.category, i);
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(category_, i);
             bool has = hasIndex(request.assetIndexes, index);
 
             if (has && !userBasket[msg.sender][index]) {
@@ -300,23 +298,23 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
     function withdraw(uint8 category_, uint256 amount_) external {
         require(!isAssetLocked(msg.sender, category_), "Asset locked");
+        require(userInfo[msg.sender][category_].week == getCurrentWeek(), "Not updated yet");
 
         require(amount_ > 0, "Requires positive amount");
         require(amount_ <= userInfo[msg.sender][category_].currentBalance, "Not enough user balance");
 
         WithdrawRequest memory request;
-        request.category = category_;
         request.amount = amount_;
         request.time = getNow();
         request.executed = false;
-        withdrawRequestMap[msg.sender][getUnlockWeek()] = request;
+        withdrawRequestMap[msg.sender][getUnlockWeek()][category_] = request;
     }
 
-    function withdrawReady(address who_) external {
-        WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()];
+    function withdrawReady(address who_, uint8 category_) external {
+        WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()][category_];
 
-        require(!isAssetLocked(who_, request.category), "Asset locked");
-        require(userInfo[who_][request.category].week == getCurrentWeek(), "Not updated yet");
+        require(!isAssetLocked(who_, category_), "Asset locked");
+        require(userInfo[who_][category_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
         require(request.time > 0, "No request");
 
@@ -325,8 +323,8 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
         IERC20(baseToken).safeTransfer(who_, request.amount);
 
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(request.category); ++i) {
-            uint256 index = assetManager.getIndexesByCategory(request.category, i);
+        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
+            uint256 index = assetManager.getIndexesByCategory(category_, i);
 
             // Only process assets in my basket.
             if (userBasket[who_][index]) {
@@ -334,9 +332,9 @@ contract Seller is ISeller, Ownable, WeekManaged {
             }
         }
 
-        userInfo[who_][request.category].currentBalance = userInfo[who_][request.category].currentBalance.sub(request.amount);
-        userInfo[who_][request.category].futureBalance = userInfo[who_][request.category].futureBalance.sub(request.amount);
-        categoryBalance[request.category] = categoryBalance[request.category].sub(request.amount);
+        userInfo[who_][category_].currentBalance = userInfo[who_][category_].currentBalance.sub(request.amount);
+        userInfo[who_][category_].futureBalance = userInfo[who_][category_].futureBalance.sub(request.amount);
+        categoryBalance[category_] = categoryBalance[category_].sub(request.amount);
  
         request.executed = true;
     }

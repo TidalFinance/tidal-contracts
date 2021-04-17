@@ -17,9 +17,9 @@ contract AssetManager is IAssetManager, Ownable {
 
     Asset[] public assets;  // Every asset have a unique index.
 
-    mapping(uint8 => uint256[]) private indexesByCategory;
+    mapping(uint8 => uint16[]) private indexesByCategory;
 
-    function setAsset(uint256 index_, address token_, uint8 category_) external onlyOwner {
+    function setAsset(uint16 index_, address token_, uint8 category_) external onlyOwner {
         if (index_ < assets.length) {
             assets[index_].token = token_;
             assets[index_].category = category_;
@@ -34,7 +34,7 @@ contract AssetManager is IAssetManager, Ownable {
     function resetIndexesByCategory(uint8 category_) external {
         delete indexesByCategory[category_];
 
-        for (uint256 i = 0; i < assets.length; ++i) {
+        for (uint16 i = 0; i < uint16(assets.length); ++i) {
             if (assets[i].category == category_ && !assets[i].deprecated) {
                 indexesByCategory[category_].push(i);
             }
@@ -49,19 +49,19 @@ contract AssetManager is IAssetManager, Ownable {
         return assets.length;
     }
 
-    function getAssetToken(uint256 index_) external override view returns(address) {
+    function getAssetToken(uint16 index_) external override view returns(address) {
         return assets[index_].token;
     }
 
-    function getAssetCategory(uint256 index_) external override view returns(uint8) {
+    function getAssetCategory(uint16 index_) external override view returns(uint8) {
         return assets[index_].category;
     }
 
-    function getAssetDeprecated(uint256 index_) external override view returns(bool) {
+    function getAssetDeprecated(uint16 index_) external override view returns(bool) {
         return assets[index_].deprecated;
     }
 
-    function getIndexesByCategory(uint8 category_, uint256 categoryIndex_) external override view returns(uint256) {
+    function getIndexesByCategory(uint8 category_, uint256 categoryIndex_) external override view returns(uint16) {
         return indexesByCategory[category_][categoryIndex_];
     }
 

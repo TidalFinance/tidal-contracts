@@ -15,9 +15,15 @@ contract Policy is ERC1155, IPolicy, Ownable {
 
     IBuyer public buyer;
 
-    mapping(uint256 => mapping(uint256 => uint256)) public idMap;
-    mapping(uint256 => uint256) public idToAssetIndex;
+    // assetIndex => week => id
+    mapping(uint16 => mapping(uint256 => uint256)) public idMap;
+
+    // id => assetIndex
+    mapping(uint256 => uint16) public idToAssetIndex;
+
+    // id => week
     mapping(uint256 => uint256) public idToWeek;
+
     uint256 public nextId = 1;
 
     constructor (
@@ -31,7 +37,7 @@ contract Policy is ERC1155, IPolicy, Ownable {
         return now.div(7 days);
     }
 
-    function mint(uint256 assetIndex_) public {
+    function mint(uint16 assetIndex_) public {
         require(buyer.isUserCovered(_msgSender()), "Not covered");
         uint256 currentWeek = getCurrentWeek();
 

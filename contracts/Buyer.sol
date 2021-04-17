@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./WeekManaged.sol";
+import "./PremiumCalculator.sol";
 
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBonus.sol";
@@ -40,7 +41,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     IBonus public bonus;
     IGuarantor public guarantor;
     ISeller public seller;
-    uint256 public guarantorPercentage = 10;  // 10%
+    address platform;
+
+    uint256 public guarantorPercentage = 5;  // 5%
+    uint256 public platformPercentage = 5;  // 5%
 
     struct PoolInfo {
         uint256 weekOfBonus;
@@ -48,7 +52,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     // assetIndex => PoolInfo
-    mapping(uint256 => PoolInfo) public poolInfo;
+    mapping(uint16 => PoolInfo) public poolInfo;
 
     struct UserInfo {
         uint256 balance;
@@ -61,24 +65,26 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     mapping(address => UserInfo) public userInfoMap;
 
     // user => assetIndex => amount
-    mapping(address => mapping(uint256 => uint256)) public override currentSubscription;
+    mapping(address => mapping(uint16 => uint256)) public override currentSubscription;
 
     // user => assetIndex => amount
-    mapping(address => mapping(uint256 => uint256)) public override futureSubscription;
+    mapping(address => mapping(uint16 => uint256)) public override futureSubscription;
 
     // assetIndex => total
-    mapping(uint256 => uint256) public assetSubscription;
+    mapping(uint16 => uint256) public assetSubscription;
 
     // assetIndex => utilization
-    mapping(uint256 => uint256) public assetUtilization;
+    mapping(uint16 => uint256) public assetUtilization;
 
     // assetIndex => total
-    mapping(uint256 => uint256) public override premiumForGuarantor;
+    mapping(uint16 => uint256) public override premiumForGuarantor;
 
-    // category => total
-    mapping(uint8 => uint256) public override premiumForSeller;
+    // assetIndex => total
+    mapping(uint16 => uint256) public override premiumForSeller;
 
     uint256 public override weekToUpdate;
+
+    PremiumCalculator public premiumCalculator;
 
     constructor () public { }
 
@@ -106,29 +112,27 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         guarantor = guarantor_;
     }
 
+    function setPlatform(address platform_) external onlyOwner {
+        platform = platform_;
+    }
+
     function setGuarantorPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         guarantorPercentage = percentage_;
     }
 
-    function getPremiumRate(uint256 assetIndex_) public view returns(uint256) {
+    function setPlatformPercentage(uint256 percentage_) external onlyOwner {
+        require(percentage_ < PERCENTAGE_BASE, "Invalid input");
+        platformPercentage = percentage_;
+    }
+
+    function setPremiumCalculator(PremiumCalculator premiumCalculator_) external onlyOwner {
+        premiumCalculator = premiumCalculator_;
+    }
+
+    function getPremiumRate(uint16 assetIndex_) public view returns(uint256) {
         uint8 category = assetManager.getAssetCategory(assetIndex_);
-        uint256 extra;
-        uint256 cap = UTILIZATION_BASE * 8 / 10;  // 80%
-
-        if (assetUtilization[assetIndex_] >= cap) {
-            extra = 30000;
-        } else {
-            extra = 30000 * assetUtilization[assetIndex_] / cap;
-        }
-
-        if (category == 0) {
-            return 14000 + extra;
-        } else if (category == 1) {
-            return 56000 + extra;
-        } else {
-            return 108000 + extra;
-        }
+        return premiumCalculator.getPremiumRate(category, assetUtilization[assetIndex_]);
     }
 
     function isUserCovered(address who_) public override view returns(bool) {
@@ -137,7 +141,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
     function getTotalFuturePremium(address who_) public view returns(uint256) {
         uint256 total = 0;
-        for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
+        for (uint16 index = 0; index < assetManager.getAssetLength(); ++index) {
             if (futureSubscription[who_][index] > 0) {
                 total = total.add(futureSubscription[who_][index].mul(getPremiumRate(index)).div(PREMIUM_BASE));
             }
@@ -150,7 +154,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         return userInfoMap[who_].balance;
     }
 
-    function getUtilization(uint256 assetIndex_) public view returns(uint256) {
+    function getUtilization(uint16 assetIndex_) public view returns(uint256) {
         uint256 sellerAssetBalance = seller.assetBalance(assetIndex_);
 
         if (sellerAssetBalance == 0) {
@@ -171,32 +175,28 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         require(weekToUpdate < currentWeek, "Already called");
 
         if (weekToUpdate > 0) {
-            uint8 category;
-
-            for (category = 0; category < assetManager.getCategoryLength(); ++category) {
-                premiumForSeller[category] = 0;
-            }
-
             uint256 totalForGuarantor = 0;
             uint256 totalForSeller = 0;
+            uint256 feeForPlatform = 0;
 
             // To preserve last week's data before update buyers.
-            for (uint256 index = 0; index < assetManager.getAssetLength(); ++index) {
-                category = assetManager.getAssetCategory(index);
-                uint256 premiumOfAsset = assetSubscription[index] * 
-                    getPremiumRate(index) / PREMIUM_BASE;
+            for (uint16 index = 0; index < assetManager.getAssetLength(); ++index) {
+                uint256 premiumOfAsset = assetSubscription[index].mul(
+                    getPremiumRate(index)).div(PREMIUM_BASE);
 
-                premiumForGuarantor[index] = premiumOfAsset * guarantorPercentage / PERCENTAGE_BASE;
+                premiumForGuarantor[index] = premiumOfAsset.mul(guarantorPercentage).div(PERCENTAGE_BASE);
                 totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
 
-                uint256 deltaForCategory = premiumOfAsset * (PERCENTAGE_BASE - guarantorPercentage) / PERCENTAGE_BASE;
-                premiumForSeller[category] = premiumForSeller[category].add(deltaForCategory);
-                totalForSeller = totalForSeller.add(deltaForCategory);
+                feeForPlatform = feeForPlatform.add(premiumOfAsset.mul(platformPercentage).div(PERCENTAGE_BASE));
+
+                premiumForSeller[index] = premiumOfAsset.mul(PERCENTAGE_BASE.sub(guarantorPercentage).sub(platformPercentage)).div(PERCENTAGE_BASE);
+                totalForSeller = totalForSeller.add(premiumForSeller[index]);
 
                 // Calculate assetUtilization from assetSubscription and seller.assetBalance
                 assetUtilization[index] = getUtilization(index);
             }
 
+            IERC20(baseToken).transfer(platform, feeForPlatform);
             IERC20(baseToken).approve(address(guarantor), totalForGuarantor);
             IERC20(baseToken).approve(address(seller), totalForSeller);
         }
@@ -205,7 +205,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     // Update and pay last week's bonus.
-    function updateBonus(uint256 assetIndex_, uint256 amount_) external override {
+    function updateBonus(uint16 assetIndex_, uint256 amount_) external override {
         require(msg.sender == address(bonus), "Only Bonus can call");
 
         uint256 currentWeek = getCurrentWeek();
@@ -231,7 +231,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         require(currentWeek == weekToUpdate, "Not ready to update");
         require(userInfoMap[who_].weekUpdated < currentWeek, "Already updated");
 
-        uint256 index;
+        uint16 index;
 
         // Check bonus.
         for (index = 0; index < assetManager.getAssetLength(); ++index) {
@@ -284,11 +284,11 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);
     }
 
-    function subscribe(uint256 assetIndex_, uint256 amount_) external {
+    function subscribe(uint16 assetIndex_, uint256 amount_) external {
         futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].add(amount_);
     }
 
-    function unsubscribe(uint256 assetIndex_, uint256 amount_) external {
+    function unsubscribe(uint16 assetIndex_, uint256 amount_) external {
         futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].sub(amount_);
     }
 

@@ -22,16 +22,16 @@ contract Bonus is IBonus, Ownable, WeekManaged {
     IGuarantor public guarantor;
     ISeller public seller;
 
-    uint256 public bonusPerAssetOfG = 1000e18;
-    uint256 public bonusPerCategoryOfS = 10000e18;
+    uint256 public bonusPerAssetOfG = 500e18;
+    uint256 public bonusPerAssetOfS = 3500e18;
     uint256 public bonusPerAssetOfB = 1000e18;
 
     // assetIndex => week
-    mapping(uint256 => uint256) public buyerWeek;
-    // category => week
-    mapping(uint8 => uint256) public sellerWeek;
+    mapping(uint16 => uint256) public buyerWeek;
     // assetIndex => week
-    mapping(uint256 => uint256) public guarantorWeek;
+    mapping(uint16 => uint256) public sellerWeek;
+    // assetIndex => week
+    mapping(uint16 => uint256) public guarantorWeek;
 
     constructor () public { }
 
@@ -55,15 +55,15 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         bonusPerAssetOfG = value_;
     }
 
-    function setBonusPerCategoryOfS(uint256 value_) external onlyOwner {
-        bonusPerCategoryOfS = value_;
+    function setBonusPerAssetOfS(uint256 value_) external onlyOwner {
+        bonusPerAssetOfS = value_;
     }
 
     function setBonusPerAssetOfB(uint256 value_) external onlyOwner {
         bonusPerAssetOfB = value_;
     }
 
-    function updateBuyerBonus(uint256 assetIndex_) external {
+    function updateBuyerBonus(uint16 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
         require(buyerWeek[assetIndex_] < currentWeek, "Already updated");
 
@@ -73,17 +73,17 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         buyerWeek[assetIndex_] = currentWeek;
     }
 
-    function updateSellerBonus(uint8 category_) external {
+    function updateSellerBonus(uint16 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
-        require(sellerWeek[category_] < currentWeek, "Already updated");
+        require(sellerWeek[assetIndex_] < currentWeek, "Already updated");
 
-        tidalToken.approve(address(seller), bonusPerCategoryOfS);
-        seller.updateBonus(category_, bonusPerCategoryOfS);
+        tidalToken.approve(address(seller), bonusPerAssetOfS);
+        seller.updateBonus(assetIndex_, bonusPerAssetOfS);
 
-        sellerWeek[category_] = currentWeek;
+        sellerWeek[assetIndex_] = currentWeek;
     }
 
-    function updateGuarantorBonus(uint256 assetIndex_) external {
+    function updateGuarantorBonus(uint16 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
         require(guarantorWeek[assetIndex_] < currentWeek, "Already updated");
 

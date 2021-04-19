@@ -34,14 +34,13 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
     IERC20 public tidalToken;
 
     struct WithdrawRequest {
-        uint16 assetIndex;
         uint256 amount;
         uint256 time;
         bool executed;
     }
 
-    // who => WithdrawRequest[]
-    mapping(address => WithdrawRequest[]) public withdrawRequestMap;
+    // who => week => assetIndex => WithdrawRequest
+    mapping(address => mapping(uint256 => mapping(uint16 => WithdrawRequest))) public withdrawRequestMap;
 
     struct PoolInfo {
         uint256 weekOfPremium;
@@ -217,34 +216,35 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
     function withdraw(uint16 assetIndex_, uint256 amount_) external {
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
 
+        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
+
         require(amount_ > 0, "Requires positive amount");
         require(amount_ <= userBalance[msg.sender][assetIndex_].currentBalance, "Not enough user balance");
 
         WithdrawRequest memory request;
-        request.assetIndex = assetIndex_;
         request.amount = amount_;
         request.time = getNow();
         request.executed = false;
-        withdrawRequestMap[msg.sender].push(request);
+        withdrawRequestMap[msg.sender][getUnlockWeek()][assetIndex_] = request;
     }
 
-    function withdrawReady(address who_, uint256 requestIndex_) external {
-        WithdrawRequest storage request = withdrawRequestMap[msg.sender][requestIndex_];
+    function withdrawReady(address who_, uint16 assetIndex_) external {
+        WithdrawRequest storage request = withdrawRequestMap[msg.sender][getCurrentWeek()][assetIndex_];
 
-        require(!hasPendingPayout(request.assetIndex), "Has pending payout");
+        require(!hasPendingPayout(assetIndex_), "Has pending payout");
         require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
+        require(request.time > 0, "No request");
 
         uint256 unlockTime = getUnlockTime(request.time);
-
         require(getNow() > unlockTime, "Not ready to withdraw yet");
 
-        address token = assetManager.getAssetToken(request.assetIndex);
+        address token = assetManager.getAssetToken(assetIndex_);
         IERC20(token).safeTransfer(msg.sender, request.amount);
 
-        assetBalance[request.assetIndex] = assetBalance[request.assetIndex].sub(request.amount);
-        userBalance[who_][request.assetIndex].currentBalance = userBalance[who_][request.assetIndex].currentBalance.sub(request.amount);
-        userBalance[who_][request.assetIndex].futureBalance = userBalance[who_][request.assetIndex].futureBalance.sub(request.amount);
+        assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(request.amount);
+        userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(request.amount);
+        userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(request.amount);
 
         request.executed = true;
     }

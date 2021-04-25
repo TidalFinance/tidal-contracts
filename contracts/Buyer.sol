@@ -244,10 +244,6 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         if (userInfoMap[who_].balance >= cost) {
             userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
 
-            // Update user bonus.
-            userInfoMap[who_].bonus = userInfoMap[who_].bonus.add(currentSubscription[who_][index].mul(
-                poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
-
             if (userInfoMap[who_].weekBegin == 0 ||
                     userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
                 userInfoMap[who_].weekBegin = currentWeek;
@@ -256,6 +252,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
             userInfoMap[who_].weekEnd = currentWeek;
 
             for (index = 0; index < assetManager.getAssetLength(); ++index) {
+                // Update user bonus.
+                userInfoMap[who_].bonus = userInfoMap[who_].bonus.add(currentSubscription[who_][index].mul(
+                    poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
+
                 if (futureSubscription[who_][index] > 0) {
                     currentSubscription[who_][index] = futureSubscription[who_][index];
 

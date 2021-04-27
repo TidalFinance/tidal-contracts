@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./NonReentrancy.sol";
 import "./WeekManaged.sol";
 
 import "./interfaces/IAssetManager.sol";
@@ -15,7 +16,7 @@ import "./interfaces/IRegistry.sol";
 
 
 // This contract is owned by Timelock.
-contract Guarantor is IGuarantor, Ownable, WeekManaged {
+contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -83,7 +84,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
     }
 
     // Update and pay last week's premium.
-    function updatePremium(uint16 assetIndex_) external {
+    function updatePremium(uint16 assetIndex_) external lock {
         uint256 week = getCurrentWeek();
         require(IBuyer(registry.buyer()).weekToUpdate() == week, "buyer not ready");
         require(poolInfo[assetIndex_].weekOfPremium < week, "already updated");
@@ -100,7 +101,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
     }
 
     // Update and pay last week's bonus.
-    function updateBonus(uint16 assetIndex_, uint256 amount_) external override {
+    function updateBonus(uint16 assetIndex_, uint256 amount_) external lock override {
         require(msg.sender == registry.bonus(), "Only Bonus can call");
 
         uint256 week = getCurrentWeek();
@@ -163,7 +164,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
         return payoutId > 0 && !payoutInfo[payoutId].finished;
     }
 
-    function deposit(uint16 assetIndex_, uint256 amount_) external {
+    function deposit(uint16 assetIndex_, uint256 amount_) external lock {
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
         require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
 
@@ -173,7 +174,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
         userBalance[msg.sender][assetIndex_].futureBalance = userBalance[msg.sender][assetIndex_].futureBalance.add(amount_);
     }
 
-    function reduceDeposit(uint16 assetIndex_, uint256 amount_) external {
+    function reduceDeposit(uint16 assetIndex_, uint256 amount_) external lock {
         // Even asset locked, user can still reduce.
 
         require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
@@ -201,7 +202,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
         withdrawRequestMap[msg.sender][getUnlockWeek()][assetIndex_] = request;
     }
 
-    function withdrawReady(address who_, uint16 assetIndex_) external {
+    function withdrawReady(address who_, uint16 assetIndex_) external lock {
         WithdrawRequest storage request = withdrawRequestMap[msg.sender][getCurrentWeek()][assetIndex_];
 
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
@@ -222,12 +223,12 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
         request.executed = true;
     }
 
-    function claimPremium() external {
+    function claimPremium() external lock {
         IERC20(registry.baseToken()).safeTransfer(msg.sender, userInfo[msg.sender].premium);
         userInfo[msg.sender].premium = 0;
     }
 
-    function claimBonus() external {
+    function claimBonus() external lock {
         IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfo[msg.sender].bonus);
         userInfo[msg.sender].bonus = 0;
     }
@@ -267,7 +268,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged {
         }
     }
 
-    function finishPayout(uint256 payoutId_) external {
+    function finishPayout(uint256 payoutId_) external lock {
         require(!payoutInfo[payoutId_].finished, "already finished");
 
         if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {

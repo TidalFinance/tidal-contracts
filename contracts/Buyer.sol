@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import "./WeekManaged.sol";
+import "./NonReentrancy.sol";
 import "./PremiumCalculator.sol";
+import "./WeekManaged.sol";
 
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBuyer.sol";
@@ -17,7 +18,7 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Buyer is IBuyer, Ownable, WeekManaged {
+contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -108,7 +109,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     // Called every week.
-    function beforeUpdate() public {
+    function beforeUpdate() external lock {
         uint256 currentWeek = getCurrentWeek();
 
         require(weekToUpdate < currentWeek, "Already called");
@@ -150,7 +151,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     // Update and pay last week's bonus.
-    function updateBonus(uint16 assetIndex_, uint256 amount_) external override {
+    function updateBonus(uint16 assetIndex_, uint256 amount_) external lock override {
         require(msg.sender == registry.bonus(), "Only Bonus can call");
 
         uint256 currentWeek = getCurrentWeek();
@@ -218,13 +219,13 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     // Deposit
-    function deposit(uint256 amount_) external {
+    function deposit(uint256 amount_) external lock {
         IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
     }
 
     // Withdraw
-    function withdraw(uint256 amount_) external {
+    function withdraw(uint256 amount_) external lock {
         require(userInfoMap[msg.sender].balance > amount_, "not enough balance");
         IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);
@@ -238,7 +239,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].sub(amount_);
     }
 
-    function claimBonus() external {
+    function claimBonus() external lock {
         IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfoMap[msg.sender].bonus);
         userInfoMap[msg.sender].bonus = 0;
     }

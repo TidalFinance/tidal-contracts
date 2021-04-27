@@ -68,8 +68,8 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
         bool finished;
     }
 
-    // payoutId => PayoutInfo
-    mapping(uint256 => PayoutInfo) public payoutInfo;
+    // assetIndex => payoutId => PayoutInfo
+    mapping(uint16 => mapping(uint256 => PayoutInfo)) public payoutInfo;
 
     // assetIndex => payoutId
     mapping(uint16 => uint256) public payoutIdMap;
@@ -156,12 +156,12 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
 
     function isAssetLocked(address who_, uint16 assetIndex_) public view returns(bool) {
         uint256 payoutId = payoutIdMap[assetIndex_];
-        return payoutId > 0 && !payoutInfo[payoutId].finished && userPayoutIdMap[who_][assetIndex_] < payoutId;
+        return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished && userPayoutIdMap[who_][assetIndex_] < payoutId;
     }
 
     function hasPendingPayout(uint16 assetIndex_) public view returns(bool) {
         uint256 payoutId = payoutIdMap[assetIndex_];
-        return payoutId > 0 && !payoutInfo[payoutId].finished;
+        return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
     }
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
@@ -240,46 +240,53 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
 
     function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external onlyOwner {
         require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
-        require(payoutInfo[payoutId_].total == 0, "already set");
+        require(payoutInfo[assetIndex_][payoutId_].total == 0, "already set");
         require(total_ <= assetBalance[assetIndex_], "More than asset");
 
-        payoutInfo[payoutId_].toAddress = toAddress_;
-        payoutInfo[payoutId_].total = total_;
-        payoutInfo[payoutId_].unitPerShare = total_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
-        payoutInfo[payoutId_].paid = 0;
-        payoutInfo[payoutId_].finished = false;
+        payoutInfo[assetIndex_][payoutId_].toAddress = toAddress_;
+        payoutInfo[assetIndex_][payoutId_].total = total_;
+        payoutInfo[assetIndex_][payoutId_].unitPerShare = total_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
+        payoutInfo[assetIndex_][payoutId_].paid = 0;
+        payoutInfo[assetIndex_][payoutId_].finished = false;
     }
 
     function doPayout(address who_, uint16 assetIndex_) external {
         for (uint256 payoutId = userPayoutIdMap[who_][assetIndex_] + 1; payoutId <= payoutIdMap[assetIndex_]; ++payoutId) {
             userPayoutIdMap[who_][assetIndex_] = payoutId;
 
-            if (payoutInfo[payoutId].finished) {
+            if (payoutInfo[assetIndex_][payoutId].finished) {
                 continue;
             }
 
             uint256 amountToPay = userBalance[who_][assetIndex_].currentBalance.mul(
-                payoutInfo[payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
+                payoutInfo[assetIndex_][payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
 
             userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(amountToPay);
             userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(amountToPay);
             assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
-            payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
+            payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
         }
     }
 
-    function finishPayout(uint256 payoutId_) external lock {
-        require(!payoutInfo[payoutId_].finished, "already finished");
+    // This function can be called by anyone as long as he will pay for the difference.
+    function finishPayout(uint16 assetIndex_, uint256 payoutId_) external lock {
+        require(payoutId_ <= payoutIdMap[assetIndex_], "payoutId should be valid");
+        require(!payoutInfo[assetIndex_][payoutId_].finished, "already finished");
 
-        if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {
+        address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
+
+        if (payoutInfo[assetIndex_][payoutId_].paid < payoutInfo[assetIndex_][payoutId_].total) {
             // In case there is still small error.
-            IERC20(registry.baseToken()).safeTransferFrom(
-                msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
-            payoutInfo[payoutId_].paid = payoutInfo[payoutId_].total;
+            IERC20(token).safeTransferFrom(
+                msg.sender,
+                address(this),
+                payoutInfo[assetIndex_][payoutId_].total.sub(payoutInfo[assetIndex_][payoutId_].paid));
+            payoutInfo[assetIndex_][payoutId_].paid = payoutInfo[assetIndex_][payoutId_].total;
         }
 
-        IERC20(registry.tidalToken()).safeTransfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
+        IERC20(token).safeTransfer(payoutInfo[assetIndex_][payoutId_].toAddress,
+                           payoutInfo[assetIndex_][payoutId_].total);
 
-        payoutInfo[payoutId_].finished = true;
+        payoutInfo[assetIndex_][payoutId_].finished = true;
     }
 }

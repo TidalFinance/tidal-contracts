@@ -226,7 +226,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     // Withdraw
     function withdraw(uint256 amount_) external lock {
-        require(userInfoMap[msg.sender].balance > amount_, "not enough balance");
+        require(userInfoMap[msg.sender].balance >= amount_, "not enough balance");
         IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);
     }

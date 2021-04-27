@@ -141,9 +141,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
                 assetUtilization[index] = getUtilization(index);
             }
 
-            IERC20(registry.baseToken()).transfer(registry.platform(), feeForPlatform);
-            IERC20(registry.baseToken()).approve(registry.guarantor(), totalForGuarantor);
-            IERC20(registry.baseToken()).approve(registry.seller(), totalForSeller);
+            IERC20(registry.baseToken()).safeTransfer(registry.platform(), feeForPlatform);
+            IERC20(registry.baseToken()).safeApprove(registry.guarantor(), totalForGuarantor);
+            IERC20(registry.baseToken()).safeApprove(registry.seller(), totalForSeller);
         }
 
         weekToUpdate = currentWeek;

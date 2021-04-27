@@ -29,52 +29,63 @@ contract Registry is Ownable, IRegistry {
     address public override baseToken;
     address public override assetManager;
     address public override premiumCalculator;
-    address public override platform;
+    address public override platform;  // Fees go here.
 
     uint256 public override guarantorPercentage = 5;  // 5%
     uint256 public override platformPercentage = 5;  // 5%
 
     function setBuyer(address buyer_) external onlyOwner {
+        require(buyer == address(0), "Can set only once");
         buyer = buyer_;
     }
 
     function setSeller(address seller_) external onlyOwner {
+        require(seller == address(0), "Can set only once");
         seller = seller_;
     }
 
     function setGuarantor(address guarantor_) external onlyOwner {
+        require(guarantor == address(0), "Can set only once");
         guarantor = guarantor_;
     }
 
+    // Upgradable, in case we want to change mining algorithm.
     function setBonus(address bonus_) external onlyOwner {
         bonus = bonus_;
     }
 
     function setTidalToken(address tidalToken_) external onlyOwner {
+        require(tidalToken == address(0), "Can set only once");
         tidalToken = tidalToken_;
     }
 
     function setBaseToken(address baseToken_) external onlyOwner {
+        require(baseToken == address(0), "Can set only once");
         baseToken = baseToken_;
     }
 
     function setAssetManager(address assetManager_) external onlyOwner {
+        require(assetManager == address(0), "Can set only once");
         assetManager = assetManager_;
     }
 
+    // Upgradable, in case we want to change premium formula.
     function setPremiumManager(address premiumManager_) external onlyOwner {
         premiumManager = premiumManager_;
     }
 
+    // Upgradable.
     function setPlatform(address platform_) external onlyOwner {
         platform = platform_;
     }
 
+    // Upgradable.
     function setGuarantorPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         guarantorPercentage = percentage_;
     }
 
+    // Upgradable.
     function setPlatformPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         platformPercentage = percentage_;

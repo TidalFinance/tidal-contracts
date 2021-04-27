@@ -172,7 +172,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     }
 
     // Called for every user every week.
-    function update(address who_) public {
+    function update(address who_) external {
         uint256 currentWeek = getCurrentWeek();
 
         require(currentWeek == weekToUpdate, "Not ready to update");
@@ -213,6 +213,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
                     currentSubscription[who_][index] = 0;
                 }
             }
+        } else {
+            // Stops user's subscription.
+            // We don't need to do anything.
+            // Even though user has currentSubscription and futureSubscription, he is not covered.
         }
 
         userInfoMap[who_].weekUpdated = currentWeek;  // This week.

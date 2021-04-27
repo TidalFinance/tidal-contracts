@@ -10,9 +10,9 @@ import "./WeekManaged.sol";
 import "./PremiumCalculator.sol";
 
 import "./interfaces/IAssetManager.sol";
-import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
+import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
 
 
@@ -22,29 +22,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
-    // The base of percentage.
-    uint256 constant PERCENTAGE_BASE = 100;
-
-    // The base of utilization.
-    uint256 constant UTILIZATION_BASE = 1e6;
-
-    // The base of premium rate and accWeeklyCost
-    uint256 constant PREMIUM_BASE = 1e6;
-
-    // For improving precision of bonusPerShare.
-    uint256 constant UNIT_PER_SHARE = 1e18;
-
-    IERC20 public baseToken;  // By default it's USDC
-    IERC20 public tidalToken;
-
-    IAssetManager public assetManager;
-    IBonus public bonus;
-    IGuarantor public guarantor;
-    ISeller public seller;
-    address platform;
-
-    uint256 public guarantorPercentage = 5;  // 5%
-    uint256 public platformPercentage = 5;  // 5%
+    IRegistry public registry;
 
     struct PoolInfo {
         uint256 weekOfBonus;
@@ -84,55 +62,16 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
     uint256 public override weekToUpdate;
 
-    PremiumCalculator public premiumCalculator;
-
     constructor () public { }
 
-    function setBaseToken(IERC20 baseToken_) external onlyOwner {
-        baseToken = baseToken_;
-    }
-
-    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
-        tidalToken = tidalToken_;
-    }
-
-    function setAssetManager(IAssetManager assetManager_) external onlyOwner {
-        assetManager = assetManager_;
-    }
-
-    function setBonus(IBonus bonus_) external onlyOwner {
-        bonus = bonus_;
-    }
-
-    function setSeller(ISeller seller_) external onlyOwner {
-        seller = seller_;
-    }
-
-    function setGuarantor(IGuarantor guarantor_) external onlyOwner {
-        guarantor = guarantor_;
-    }
-
-    function setPlatform(address platform_) external onlyOwner {
-        platform = platform_;
-    }
-
-    function setGuarantorPercentage(uint256 percentage_) external onlyOwner {
-        require(percentage_ < PERCENTAGE_BASE, "Invalid input");
-        guarantorPercentage = percentage_;
-    }
-
-    function setPlatformPercentage(uint256 percentage_) external onlyOwner {
-        require(percentage_ < PERCENTAGE_BASE, "Invalid input");
-        platformPercentage = percentage_;
-    }
-
-    function setPremiumCalculator(PremiumCalculator premiumCalculator_) external onlyOwner {
-        premiumCalculator = premiumCalculator_;
+    function setRegistry(IRegistry registry_) external onlyOwner {
+        registry = registry_;
     }
 
     function getPremiumRate(uint16 assetIndex_) public view returns(uint256) {
-        uint8 category = assetManager.getAssetCategory(assetIndex_);
-        return premiumCalculator.getPremiumRate(category, assetUtilization[assetIndex_]);
+        uint8 category = IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_);
+        return PremiumCalculator(registry.premiumCalculator()).getPremiumRate(
+            category, assetUtilization[assetIndex_]);
     }
 
     function isUserCovered(address who_) public override view returns(bool) {
@@ -141,9 +80,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
     function getTotalFuturePremium(address who_) public view returns(uint256) {
         uint256 total = 0;
-        for (uint16 index = 0; index < assetManager.getAssetLength(); ++index) {
+        for (uint16 index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
             if (futureSubscription[who_][index] > 0) {
-                total = total.add(futureSubscription[who_][index].mul(getPremiumRate(index)).div(PREMIUM_BASE));
+                total = total.add(futureSubscription[who_][index].mul(getPremiumRate(index)).div(registry.PREMIUM_BASE()));
             }
         }
 
@@ -155,17 +94,17 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     function getUtilization(uint16 assetIndex_) public view returns(uint256) {
-        uint256 sellerAssetBalance = seller.assetBalance(assetIndex_);
+        uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
 
         if (sellerAssetBalance == 0) {
             return 0;
         }
 
         if (assetSubscription[assetIndex_] > sellerAssetBalance) {
-            return UTILIZATION_BASE;
+            return registry.UTILIZATION_BASE();
         }
 
-        return assetSubscription[assetIndex_] * UTILIZATION_BASE / sellerAssetBalance;
+        return assetSubscription[assetIndex_] * registry.UTILIZATION_BASE() / sellerAssetBalance;
     }
 
     // Called every week.
@@ -180,25 +119,31 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
             uint256 feeForPlatform = 0;
 
             // To preserve last week's data before update buyers.
-            for (uint16 index = 0; index < assetManager.getAssetLength(); ++index) {
+            for (uint16 index = 0;
+                    index < IAssetManager(registry.assetManager()).getAssetLength();
+                    ++index) {
                 uint256 premiumOfAsset = assetSubscription[index].mul(
-                    getPremiumRate(index)).div(PREMIUM_BASE);
+                    getPremiumRate(index)).div(registry.PREMIUM_BASE());
 
-                premiumForGuarantor[index] = premiumOfAsset.mul(guarantorPercentage).div(PERCENTAGE_BASE);
+                premiumForGuarantor[index] = premiumOfAsset.mul(
+                    registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
                 totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
 
-                feeForPlatform = feeForPlatform.add(premiumOfAsset.mul(platformPercentage).div(PERCENTAGE_BASE));
+                feeForPlatform = feeForPlatform.add(
+                    premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
 
-                premiumForSeller[index] = premiumOfAsset.mul(PERCENTAGE_BASE.sub(guarantorPercentage).sub(platformPercentage)).div(PERCENTAGE_BASE);
+                premiumForSeller[index] = premiumOfAsset.mul(
+                    registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
+                        registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
                 totalForSeller = totalForSeller.add(premiumForSeller[index]);
 
                 // Calculate assetUtilization from assetSubscription and seller.assetBalance
                 assetUtilization[index] = getUtilization(index);
             }
 
-            IERC20(baseToken).transfer(platform, feeForPlatform);
-            IERC20(baseToken).approve(address(guarantor), totalForGuarantor);
-            IERC20(baseToken).approve(address(seller), totalForSeller);
+            IERC20(registry.baseToken()).transfer(registry.platform(), feeForPlatform);
+            IERC20(registry.baseToken()).approve(registry.guarantor(), totalForGuarantor);
+            IERC20(registry.baseToken()).approve(registry.seller(), totalForSeller);
         }
 
         weekToUpdate = currentWeek;
@@ -206,7 +151,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
     // Update and pay last week's bonus.
     function updateBonus(uint16 assetIndex_, uint256 amount_) external override {
-        require(msg.sender == address(bonus), "Only Bonus can call");
+        require(msg.sender == registry.bonus(), "Only Bonus can call");
 
         uint256 currentWeek = getCurrentWeek();
 
@@ -214,8 +159,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         require(poolInfo[assetIndex_].weekOfBonus < currentWeek, "already updated");
 
         if (assetSubscription[assetIndex_] > 0) {
-            IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
-            poolInfo[assetIndex_].bonusPerShare = amount_.mul(UNIT_PER_SHARE).div(assetSubscription[assetIndex_]);
+            IERC20(registry.tidalToken()).safeTransferFrom(msg.sender, address(this), amount_);
+            poolInfo[assetIndex_].bonusPerShare = amount_.mul(
+                registry.UNIT_PER_SHARE()).div(assetSubscription[assetIndex_]);
         }
 
         poolInfo[assetIndex_].weekOfBonus = currentWeek;
@@ -234,7 +180,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
         uint16 index;
 
         // Check bonus.
-        for (index = 0; index < assetManager.getAssetLength(); ++index) {
+        for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
             require(poolInfo[index].weekOfBonus == currentWeek, "Not ready");
         }
 
@@ -251,10 +197,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
             userInfoMap[who_].weekEnd = currentWeek;
 
-            for (index = 0; index < assetManager.getAssetLength(); ++index) {
+            for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
                 // Update user bonus.
                 userInfoMap[who_].bonus = userInfoMap[who_].bonus.add(currentSubscription[who_][index].mul(
-                    poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
+                    poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
 
                 if (futureSubscription[who_][index] > 0) {
                     currentSubscription[who_][index] = futureSubscription[who_][index];
@@ -273,14 +219,14 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
 
     // Deposit
     function deposit(uint256 amount_) external {
-        baseToken.safeTransferFrom(msg.sender, address(this), amount_);
+        IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
     }
 
     // Withdraw
     function withdraw(uint256 amount_) external {
         require(userInfoMap[msg.sender].balance > amount_, "not enough balance");
-        baseToken.safeTransfer(msg.sender, amount_);
+        IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);
     }
 
@@ -293,7 +239,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged {
     }
 
     function claimBonus() external {
-        IERC20(tidalToken).safeTransfer(msg.sender, userInfoMap[msg.sender].bonus);
+        IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfoMap[msg.sender].bonus);
         userInfoMap[msg.sender].bonus = 0;
     }
 }

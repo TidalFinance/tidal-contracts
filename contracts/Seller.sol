@@ -9,10 +9,9 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "./WeekManaged.sol";
 
 import "./interfaces/IAssetManager.sol";
-import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";
+import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
-
 
 // This contract is owned by Timelock.
 contract Seller is ISeller, Ownable, WeekManaged {
@@ -20,18 +19,7 @@ contract Seller is ISeller, Ownable, WeekManaged {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
-    // The computing ability of EVM is limited, so we cap the maximum number of iterations
-    // at 100. If the gap is larger, just compute multiple times.
-    uint256 constant MAXIMUM_ITERATION = 100;
-
-    // For improving precision of premiumPerShare and bonusPerShare.
-    uint256 constant UNIT_PER_SHARE = 1e18;
-
-    IBonus public bonus;
-    IBuyer public buyer;
-    IAssetManager public assetManager;
-    IERC20 public baseToken;  // By default it's USDC
-    IERC20 public tidalToken;
+    IRegistry public registry;
 
     struct WithdrawRequest {
         uint256 amount;
@@ -102,38 +90,22 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
     constructor () public { }
 
-    function setBaseToken(IERC20 baseToken_) external onlyOwner {
-        baseToken = baseToken_;
-    }
-
-    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
-        tidalToken = tidalToken_;
-    }
-
-    function setAssetManager(IAssetManager assetManager_) external onlyOwner {
-        assetManager = assetManager_;
-    }
-
-    function setBuyer(IBuyer buyer_) external onlyOwner {
-        buyer = buyer_;
-    }
-
-    function setBonus(IBonus bonus_) external onlyOwner {
-        bonus = bonus_;
+    function setRegistry(IRegistry registry_) external onlyOwner {
+        registry = registry_;
     }
 
     // Update and pay last week's premium.
     function updatePremium(uint16 assetIndex_) external {
         uint256 week = getCurrentWeek();
-        require(buyer.weekToUpdate() == week, "buyer not ready");
+        require(IBuyer(registry.buyer()).weekToUpdate() == week, "buyer not ready");
         require(poolInfo[assetIndex_].weekOfPremium < week, "already updated");
 
-        uint256 amount = buyer.premiumForSeller(assetIndex_);
+        uint256 amount = IBuyer(registry.buyer()).premiumForSeller(assetIndex_);
 
         if (assetBalance[assetIndex_] > 0) {
-            IERC20(baseToken).safeTransferFrom(address(buyer), address(this), amount);
+            IERC20(registry.baseToken()).safeTransferFrom(registry.buyer(), address(this), amount);
             poolInfo[assetIndex_].premiumPerShare =
-                amount.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+                amount.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
         }
 
         poolInfo[assetIndex_].weekOfPremium = week;
@@ -141,24 +113,24 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
     // Update and pay last week's bonus.
     function updateBonus(uint16 assetIndex_, uint256 amount_) external override {
-        require(msg.sender == address(bonus), "Only Bonus can call");
+        require(msg.sender == registry.bonus(), "Only Bonus can call");
 
         uint256 week = getCurrentWeek();
 
         require(poolInfo[assetIndex_].weekOfBonus < week, "already updated");
 
         if (assetBalance[assetIndex_] > 0) {
-            IERC20(tidalToken).safeTransferFrom(msg.sender, address(this), amount_);
+            IERC20(registry.tidalToken()).safeTransferFrom(msg.sender, address(this), amount_);
             poolInfo[assetIndex_].bonusPerShare =
-                amount_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+                amount_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
         }
 
         poolInfo[assetIndex_].weekOfBonus = week;
     }
 
     function isAssetLocked(address who_, uint8 category_) public view returns(bool) {
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-            uint16 index = assetManager.getIndexesByCategory(category_, i);
+        for (uint256 i = 0; i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category_); ++i) {
+            uint16 index = IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i);
             uint256 payoutId = payoutIdMap[index];
 
             if (payoutId > 0 && !payoutInfo[payoutId].finished &&
@@ -194,8 +166,10 @@ contract Seller is ISeller, Ownable, WeekManaged {
         if (userBalance[msg.sender][category_].currentBalance == 0) {
             // Change now.
 
-            for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-                uint16 index = uint16(assetManager.getIndexesByCategory(category_, i));
+            for (uint256 i = 0;
+                    i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category_);
+                    ++i) {
+                uint16 index = uint16(IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i));
                 bool has = hasIndex(basketIndexes_, index);
 
                 if (has && !userBasket[msg.sender][index]) {
@@ -230,8 +204,10 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
         uint256 currentBalance = userBalance[who_][category_].currentBalance;
 
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-            uint16 index = uint16(assetManager.getIndexesByCategory(category_, i));
+        for (uint256 i = 0;
+                i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category_);
+                ++i) {
+            uint16 index = uint16(IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i));
             bool has = hasIndex(request.assetIndexes, index);
 
             if (has && !userBasket[msg.sender][index]) {
@@ -257,7 +233,9 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
         uint16 index;
         // Assert if premium or bonus not updated, or user already updated.
-        for (index = 0; index < assetManager.getAssetLength(); ++index) {
+        for (index = 0;
+                index < IAssetManager(registry.assetManager()).getAssetLength();
+                ++index) {
             require(poolInfo[index].weekOfPremium == week &&
                 poolInfo[index].weekOfBonus == week, "Not ready");
         }
@@ -265,18 +243,20 @@ contract Seller is ISeller, Ownable, WeekManaged {
         uint8 category;
 
         // For every asset
-        for (index = 0; index < assetManager.getAssetLength(); ++index) {
-            category = assetManager.getAssetCategory(index);
+        for (index = 0;
+                index < IAssetManager(registry.assetManager()).getAssetLength();
+                ++index) {
+            category = IAssetManager(registry.assetManager()).getAssetCategory(index);
             uint256 currentBalance = userBalance[who_][category].currentBalance;
             uint256 futureBalance = userBalance[who_][category].futureBalance;
 
             // Update premium.
             userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
-                poolInfo[index].premiumPerShare).div(UNIT_PER_SHARE));
+                poolInfo[index].premiumPerShare).div(registry.UNIT_PER_SHARE()));
 
             // Update bonus.
             userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
-                poolInfo[index].bonusPerShare).div(UNIT_PER_SHARE));
+                poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
 
             // Update asset balance if no claims.
             if (!isAssetLocked(who_, category) && userBasket[who_][index]) {
@@ -285,7 +265,9 @@ contract Seller is ISeller, Ownable, WeekManaged {
         }
 
         // Update user balance and category balance if no claims.
-        for (category = 0; category < assetManager.getCategoryLength(); ++category) {
+        for (category = 0;
+                category < IAssetManager(registry.assetManager()).getCategoryLength();
+                ++category) {
             if (!isAssetLocked(who_, category)) {
                 uint256 currentBalance = userBalance[who_][category].currentBalance;
                 uint256 futureBalance = userBalance[who_][category].futureBalance;
@@ -304,7 +286,7 @@ contract Seller is ISeller, Ownable, WeekManaged {
         require(!isAssetLocked(msg.sender, category_), "Asset locked");
         require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
 
-        IERC20(baseToken).safeTransferFrom(msg.sender, address(this), amount_);
+        IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
 
         userBalance[msg.sender][category_].futureBalance = userBalance[msg.sender][category_].futureBalance.add(amount_);
     }
@@ -315,7 +297,7 @@ contract Seller is ISeller, Ownable, WeekManaged {
         require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
         require(userBalance[msg.sender][category_].futureBalance >= amount_, "Not enough future balance");
 
-        IERC20(baseToken).safeTransfer(msg.sender, amount_);
+        IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
 
         userBalance[msg.sender][category_].futureBalance = userBalance[msg.sender][category_].futureBalance.sub(amount_);
     }
@@ -345,10 +327,12 @@ contract Seller is ISeller, Ownable, WeekManaged {
         uint256 unlockTime = getUnlockTime(request.time);
         require(getNow() > unlockTime, "Not ready to withdraw yet");
 
-        IERC20(baseToken).safeTransfer(who_, request.amount);
+        IERC20(registry.baseToken()).safeTransfer(who_, request.amount);
 
-        for (uint256 i = 0; i < assetManager.getIndexesByCategoryLength(category_); ++i) {
-            uint16 index = assetManager.getIndexesByCategory(category_, i);
+        for (uint256 i = 0;
+                i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category_);
+                ++i) {
+            uint16 index = IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i);
 
             // Only process assets in my basket.
             if (userBasket[who_][index]) {
@@ -364,12 +348,12 @@ contract Seller is ISeller, Ownable, WeekManaged {
     }
 
     function claimPremium() external {
-        IERC20(baseToken).safeTransfer(msg.sender, userInfo[msg.sender].premium);
+        IERC20(registry.baseToken()).safeTransfer(msg.sender, userInfo[msg.sender].premium);
         userInfo[msg.sender].premium = 0;
     }
 
     function claimBonus() external {
-        IERC20(tidalToken).safeTransfer(msg.sender, userInfo[msg.sender].bonus);
+        IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfo[msg.sender].bonus);
         userInfo[msg.sender].bonus = 0;
     }
 
@@ -385,7 +369,7 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
         payoutInfo[payoutId_].toAddress = toAddress_;
         payoutInfo[payoutId_].total = total_;
-        payoutInfo[payoutId_].unitPerShare = total_.mul(UNIT_PER_SHARE).div(assetBalance[assetIndex_]);
+        payoutInfo[payoutId_].unitPerShare = total_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
         payoutInfo[payoutId_].paid = 0;
         payoutInfo[payoutId_].finished = false;
     }
@@ -400,8 +384,9 @@ contract Seller is ISeller, Ownable, WeekManaged {
                 continue;
             }
 
-            uint8 category = assetManager.getAssetCategory(assetIndex_);
-            uint256 amountToPay = userBalance[who_][category].currentBalance.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
+            uint8 category = IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_);
+            uint256 amountToPay = userBalance[who_][category].currentBalance.mul(
+                payoutInfo[payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
 
             userBalance[who_][category].currentBalance = userBalance[who_][category].currentBalance.sub(amountToPay);
             userBalance[who_][category].futureBalance = userBalance[who_][category].futureBalance.sub(amountToPay);
@@ -416,11 +401,11 @@ contract Seller is ISeller, Ownable, WeekManaged {
 
         if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {
             // In case there is still small error.
-            IERC20(baseToken).safeTransferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
+            IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
             payoutInfo[payoutId_].paid = payoutInfo[payoutId_].total;
         }
 
-        IERC20(baseToken).safeTransfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
+        IERC20(registry.baseToken()).safeTransfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
 
         payoutInfo[payoutId_].finished = true;
     }

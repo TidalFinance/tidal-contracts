@@ -31,6 +31,11 @@ contract AssetManager is IAssetManager, Ownable {
         }
     }
 
+    function setDeprecated(uint16 index_, bool deprecated_) external onlyOwner {
+        assets[index_].deprecated = deprecated_;
+    }
+
+    // Anyone can call this function, but it doesn't matter.
     function resetIndexesByCategory(uint8 category_) external {
         delete indexesByCategory[category_];
 

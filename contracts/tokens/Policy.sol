@@ -5,13 +5,15 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+import "../WeekManaged.sol";
+
 import "../interfaces/IBuyer.sol";
 import "../interfaces/IPolicy.sol";
 
 
 // This token is owned by Buyer.
 // Every asset needs have a Policy deployed.
-contract Policy is ERC1155, IPolicy, Ownable {
+contract Policy is ERC1155, IPolicy, WeekManaged {
 
     IBuyer public buyer;
 
@@ -31,10 +33,6 @@ contract Policy is ERC1155, IPolicy, Ownable {
         IBuyer buyer_
     ) ERC1155(uri_) public {
         buyer = buyer_;
-    }
-
-    function getCurrentWeek() public view returns(uint256) {
-        return now.div(7 days);
     }
 
     function mint(uint16 assetIndex_) public {

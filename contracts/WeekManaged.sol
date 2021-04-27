@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract WeekManaged {
+
+contract WeekManaged is Ownable {
 
     uint256 public offset = 4 days;
     uint256 public extra = 0;
@@ -24,11 +26,11 @@ contract WeekManaged {
         return ((time_ + offset) / (7 days) + 2) * (7 days) - offset;
     }
 
-    function setOffset(uint256 offset_) external {
+    function setOffset(uint256 offset_) external onlyOwner {
         offset = offset_;
     }
 
-    function setExtra(uint256 extra_) external {
+    function setExtra(uint256 extra_) external onlyOwner {
         extra = extra_;
     }
 }

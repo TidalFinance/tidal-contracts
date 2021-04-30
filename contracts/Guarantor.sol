@@ -203,7 +203,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
     }
 
     function withdrawReady(address who_, uint16 assetIndex_) external lock {
-        WithdrawRequest storage request = withdrawRequestMap[msg.sender][getCurrentWeek()][assetIndex_];
+        WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()][assetIndex_];
 
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
         require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
@@ -214,7 +214,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
         require(getNow() > unlockTime, "Not ready to withdraw yet");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
-        IERC20(token).safeTransfer(msg.sender, request.amount);
+        IERC20(token).safeTransfer(who_, request.amount);
 
         assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(request.amount);
         userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(request.amount);

@@ -143,7 +143,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
             }
 
             IERC20(registry.baseToken()).safeTransfer(registry.platform(), feeForPlatform);
+            IERC20(registry.baseToken()).safeApprove(registry.guarantor(), 0);
             IERC20(registry.baseToken()).safeApprove(registry.guarantor(), totalForGuarantor);
+            IERC20(registry.baseToken()).safeApprove(registry.seller(), 0);
             IERC20(registry.baseToken()).safeApprove(registry.seller(), totalForSeller);
         }
 

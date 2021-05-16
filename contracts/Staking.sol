@@ -6,9 +6,11 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./tokens/GovernanceToken.sol";
+import "./interfaces/IRegistry.sol";
 
 // This contract is owned by Timelock.
-contract Staking is Ownable {
+contract Staking is Ownable, GovernanceToken {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -18,7 +20,6 @@ contract Staking is Ownable {
 
     // Info of each user.
     struct UserInfo {
-        uint256 amount; // How many tokens the user has provided.
         uint256 rewardAmount;
         uint256 rewardDebt; // Reward debt.
     }
@@ -50,7 +51,7 @@ contract Staking is Ownable {
 
     uint256 public withdrawWaitTime = 14 days;
 
-    IERC20 public tidalToken;
+    IRegistry public registry;
 
     struct PayoutInfo {
         address toAddress;
@@ -72,10 +73,10 @@ contract Staking is Ownable {
     event Withdraw(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
 
-    constructor () public { }
+    constructor () GovernanceToken("Tidal Staking", "TIDAL-STAKING") public { }
 
-    function setTidalToken(IERC20 tidalToken_) external onlyOwner {
-        tidalToken = tidalToken_;
+    function setRegistry(IRegistry registry_) external onlyOwner {
+        registry = registry_;
     }
 
     function set(
@@ -115,7 +116,7 @@ contract Staking is Ownable {
         returns (uint256)
     {
         UserInfo storage user = userInfo[who_];
-        uint256 tokenTotal = tidalToken.balanceOf(address(this));
+        uint256 tokenTotal = totalSupply();
 
         uint256 accRewardPerShare = 0;
 
@@ -126,7 +127,8 @@ contract Staking is Ownable {
             );
         }
 
-        return user.amount.mul(accRewardPerShare).div(
+        uint256 userAmount = balanceOf(who_);
+        return userAmount.mul(accRewardPerShare).div(
             UNIT_PER_SHARE).sub(user.rewardDebt).add(user.rewardAmount);
     }
 
@@ -135,7 +137,8 @@ contract Staking is Ownable {
         if (block.number <= poolInfo.lastRewardBlock) {
             return;
         }
-        uint256 tokenTotal = tidalToken.balanceOf(address(this));
+
+        uint256 tokenTotal = totalSupply();
         if (tokenTotal == 0) {
             poolInfo.lastRewardBlock = block.number;
             return;
@@ -156,29 +159,31 @@ contract Staking is Ownable {
         UserInfo storage user = userInfo[msg.sender];
         updatePool();
 
-        if (user.amount > 0) {
-            uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
+        uint256 userAmount = balanceOf(msg.sender);
+        if (userAmount > 0) {
+            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
 
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        tidalToken.transferFrom(
+        IERC20(registry.tidalToken()).transferFrom(
             msg.sender,
             address(this),
             amount_
         );
 
-        user.amount = user.amount.add(amount_);
-        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        GovernanceToken._mint(msg.sender, amount_);
+        user.rewardDebt = userAmount.add(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+
         emit Deposit(msg.sender, amount_);
     }
 
     function withdraw(uint256 amount_) external {
         require(!hasPendingPayout(), "Has pending payout");
 
-        UserInfo storage user = userInfo[msg.sender];
-        require(user.amount >= amount_, "Not enough amount");
+        uint256 userAmount = balanceOf(msg.sender);
+        require(userAmount >= amount_, "Not enough amount");
 
         withdrawRequestMap[msg.sender].push(WithdrawRequest({
             time: now,
@@ -195,19 +200,22 @@ contract Staking is Ownable {
         require(!request.executed, "already executed");
 
         UserInfo storage user = userInfo[who_];
-        require(user.amount >= request.amount, "Not enough amount");
+
+        uint256 userAmount = balanceOf(who_);
+        require(userAmount >= request.amount, "Not enough amount");
 
         updatePool();
 
-        if (user.amount > 0) {
-            uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
+        if (userAmount > 0) {
+            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        user.amount = user.amount.sub(request.amount);
-        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
-        tidalToken.transfer(address(who_), request.amount);
+        GovernanceToken._burn(who_, request.amount);
+        user.rewardDebt = userAmount.sub(request.amount).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+
+        IERC20(registry.tidalToken()).transfer(address(who_), request.amount);
 
         request.executed = true;
 
@@ -221,14 +229,15 @@ contract Staking is Ownable {
 
         updatePool();
 
-        uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
+        uint256 userAmount = balanceOf(msg.sender);
+        uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
             UNIT_PER_SHARE).sub(user.rewardDebt);
         uint256 rewardTotal = user.rewardAmount.add(pending);
 
-        tidalToken.transfer(msg.sender, rewardTotal);
+        IERC20(registry.tidalToken()).transfer(msg.sender, rewardTotal);
 
         user.rewardAmount = 0;
-        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.rewardDebt = userAmount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         emit Claim(msg.sender, rewardTotal);
     }
@@ -250,7 +259,7 @@ contract Staking is Ownable {
         require(payoutId_ == payoutId, "payoutId should be started");
         require(payoutInfo[payoutId_].total == 0, "already set");
 
-        uint256 tokenTotal = tidalToken.balanceOf(address(this));
+        uint256 tokenTotal = totalSupply();
 
         require(total_ <= tokenTotal, "More than token total");
 
@@ -263,6 +272,14 @@ contract Staking is Ownable {
 
     function doPayout(address who_) external {
         UserInfo storage user = userInfo[who_];
+        updatePool();
+
+        uint256 userAmount = balanceOf(who_);
+        if (userAmount > 0) {
+            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+                UNIT_PER_SHARE).sub(user.rewardDebt);
+            user.rewardAmount = user.rewardAmount.add(pending);
+        }
 
         for (uint256 payoutId_ = userPayoutIdMap[who_] + 1; payoutId_ <= payoutId; ++payoutId_) {
             userPayoutIdMap[who_] = payoutId_;
@@ -271,24 +288,54 @@ contract Staking is Ownable {
                 continue;
             }
 
-            uint256 amountToPay = user.amount.mul(payoutInfo[payoutId_].unitPerShare).div(UNIT_PER_SHARE);
-            user.amount = user.amount.sub(amountToPay);
+            uint256 amountToPay = userAmount.mul(payoutInfo[payoutId_].unitPerShare).div(UNIT_PER_SHARE);
+            GovernanceToken._burn(who_, amountToPay);
 
             payoutInfo[payoutId_].paid = payoutInfo[payoutId_].paid.add(amountToPay);
         }
+
+        userAmount = balanceOf(who_);
+        user.rewardDebt = userAmount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
     }
 
     function finishPayout(uint256 payoutId_) external {
         require(!payoutInfo[payoutId_].finished, "already finished");
 
         if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {
-            // In case there is still small error.
-            tidalToken.safeTransferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
+            // In case there is still small error, you, the caller please pay for it.
+            IERC20(registry.tidalToken()).transferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
             payoutInfo[payoutId_].paid = payoutInfo[payoutId_].total;
         }
 
-        tidalToken.safeTransfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
+        IERC20(registry.tidalToken()).transfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
 
         payoutInfo[payoutId_].finished = true;
+    }
+
+    function _transfer(address sender_, address recipient_, uint256 amount_) internal virtual override {
+        require(!hasPendingPayout(), "Has pending payout");
+
+        UserInfo storage fromUser = userInfo[sender_];
+        UserInfo storage toUser = userInfo[recipient_];
+        updatePool();
+
+        uint256 fromUserAmount = balanceOf(sender_);
+        if (fromUserAmount > 0) {
+            uint256 fromUserPending = fromUserAmount.mul(poolInfo.accRewardPerShare).div(
+                UNIT_PER_SHARE).sub(fromUser.rewardDebt);
+            fromUser.rewardAmount = fromUser.rewardAmount.add(fromUserPending);
+        }
+
+        uint256 toUserAmount = balanceOf(recipient_);
+        if (toUserAmount > 0) {
+            uint256 toUserPending = toUserAmount.mul(poolInfo.accRewardPerShare).div(
+                UNIT_PER_SHARE).sub(toUser.rewardDebt);
+            toUser.rewardAmount = toUser.rewardAmount.add(toUserPending);
+        }
+
+        super._transfer(sender_, recipient_, amount_);
+
+        fromUser.rewardDebt = fromUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        toUser.rewardDebt = toUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
     }
 }

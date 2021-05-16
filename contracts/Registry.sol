@@ -34,6 +34,9 @@ contract Registry is Ownable, IRegistry {
     uint256 public override guarantorPercentage = 5;  // 5%
     uint256 public override platformPercentage = 5;  // 5%
 
+    address public override governor;
+    address public override committee;
+
     function setBuyer(address buyer_) external onlyOwner {
         require(buyer == address(0), "Can set only once");
         buyer = buyer_;
@@ -89,5 +92,15 @@ contract Registry is Ownable, IRegistry {
     function setPlatformPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         platformPercentage = percentage_;
+    }
+
+    // Upgradable.
+    function setGovernor(address governor_) external onlyOwner {
+        governor = governor_;
+    }
+
+    // Upgradable.
+    function setCommittee(address committee_) external onlyOwner {
+        committee = committee_;
     }
 }

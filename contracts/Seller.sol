@@ -358,12 +358,16 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         userInfo[msg.sender].bonus = 0;
     }
 
-    function startPayout(uint16 assetIndex_, uint256 payoutId_) external onlyOwner {
+    function startPayout(uint16 assetIndex_, uint256 payoutId_) external override {
+        require(msg.sender == registry.committee(), "Only commitee can call");
+
         require(payoutId_ == payoutIdMap[assetIndex_] + 1, "payoutId should be increasing");
         payoutIdMap[assetIndex_] = payoutId_;
     }
 
-    function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external onlyOwner {
+    function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external override {
+        require(msg.sender == registry.committee(), "Only commitee can call");
+
         require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
         require(payoutInfo[assetIndex_][payoutId_].total == 0, "already set");
         require(total_ <= assetBalance[assetIndex_], "More than asset");
@@ -375,6 +379,7 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         payoutInfo[assetIndex_][payoutId_].finished = false;
     }
 
+    // This function can be called by anyone.
     function doPayout(address who_, uint16 assetIndex_) external {
         require(userBasket[who_][assetIndex_], "must be in basket");
 

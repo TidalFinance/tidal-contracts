@@ -22,4 +22,7 @@ interface IRegistry {
 
     function guarantorPercentage() external view returns(uint256);
     function platformPercentage() external view returns(uint256);
+
+    function governor() external view returns(address);
+    function committee() external view returns(address);
 }

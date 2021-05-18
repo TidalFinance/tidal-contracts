@@ -28,7 +28,6 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
     struct PayoutStartRequest {
         uint16 assetIndex;
-        uint256 time;
         address requester;
         bool executed;
         uint256 voteCount;
@@ -42,7 +41,6 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         address toAddress;
         uint256 sellerAmount;
         uint256 guarantorAmount;
-        uint256 time;
         bool executed;
         uint256 voteCount;
         mapping(address => bool) votes;
@@ -95,7 +93,6 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
         PayoutStartRequest memory request;
         request.assetIndex = assetIndex_;
-        request.time = now;
         request.requester = msg.sender;
         request.executed = false;
         request.voteCount = 0;
@@ -138,7 +135,6 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         request.toAddress = toAddress_;
         request.sellerAmount = sellerAmount_;
         request.guarantorAmount = guarantorAmount_;
-        request.time = now;
         request.executed = false;
         request.voteCount = 0;
         payoutAmountRequestMap[payoutId_] = request;

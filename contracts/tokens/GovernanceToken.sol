@@ -15,8 +15,6 @@ contract GovernanceToken is ERC20 {
     }
 
     /// @notice Creates `_amount` token to `_to`.
-    /// Must only be called by the owner (CreateSoda).
-    /// CreateSoda gurantees the maximum supply of SODA is 330,000,000
     function _mint(address _to, uint256 _amount) internal virtual override {
         super._mint(_to, _amount);
         _moveDelegates(address(0), _delegates[_to], _amount);
@@ -125,9 +123,9 @@ contract GovernanceToken is ERC20 {
         );
 
         address signatory = ecrecover(digest, v, r, s);
-        require(signatory != address(0), "SODA::delegateBySig: invalid signature");
-        require(nonce == nonces[signatory]++, "SODA::delegateBySig: invalid nonce");
-        require(now <= expiry, "SODA::delegateBySig: signature expired");
+        require(signatory != address(0), "GovernanceToken::delegateBySig: invalid signature");
+        require(nonce == nonces[signatory]++, "GovernanceToken::delegateBySig: invalid nonce");
+        require(now <= expiry, "GovernanceToken::delegateBySig: signature expired");
         return _delegate(signatory, delegatee);
     }
 
@@ -157,7 +155,7 @@ contract GovernanceToken is ERC20 {
         view
         returns (uint256)
     {
-        require(blockNumber < block.number, "SODA::getPriorVotes: not yet determined");
+        require(blockNumber < block.number, "GovernanceToken::getPriorVotes: not yet determined");
 
         uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
@@ -194,7 +192,7 @@ contract GovernanceToken is ERC20 {
         internal
     {
         address currentDelegate = _delegates[delegator];
-        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying SODAs (not scaled);
+        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying tokens (not scaled);
         _delegates[delegator] = delegatee;
 
         emit DelegateChanged(delegator, currentDelegate, delegatee);
@@ -230,7 +228,7 @@ contract GovernanceToken is ERC20 {
     )
         internal
     {
-        uint32 blockNumber = safe32(block.number, "SODA::_writeCheckpoint: block number exceeds 32 bits");
+        uint32 blockNumber = safe32(block.number, "GovernanceToken::_writeCheckpoint: block number exceeds 32 bits");
 
         if (nCheckpoints > 0 && checkpoints[delegatee][nCheckpoints - 1].fromBlock == blockNumber) {
             checkpoints[delegatee][nCheckpoints - 1].votes = newVotes;

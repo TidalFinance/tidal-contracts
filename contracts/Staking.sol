@@ -6,11 +6,13 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./WeekManaged.sol";
+
 import "./tokens/GovernanceToken.sol";
 import "./interfaces/IRegistry.sol";
 
 // This contract is owned by Timelock.
-contract Staking is Ownable, GovernanceToken {
+contract Staking is Ownable, GovernanceToken, WeekManaged {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -71,6 +73,7 @@ contract Staking is Ownable, GovernanceToken {
 
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
+    event WithdrawReady(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
 
     constructor () GovernanceToken("Tidal Staking", "TIDAL-STAKING") public { }
@@ -186,17 +189,19 @@ contract Staking is Ownable, GovernanceToken {
         require(userAmount >= amount_, "Not enough amount");
 
         withdrawRequestMap[msg.sender].push(WithdrawRequest({
-            time: now,
+            time: getCurrentWeek(),
             amount: amount_,
             executed: false
         }));
+
+        emit Withdraw(msg.sender, amount_);
     }
 
     function withdrawReady(address who_, uint256 index_) external {
         WithdrawRequest storage request = withdrawRequestMap[who_][index_];
 
         require(request.time > 0, "Non-existing request");
-        require(now > request.time.add(withdrawWaitTime), "Not ready yet");
+        require(getCurrentWeek() > request.time.add(withdrawWaitTime), "Not ready yet");
         require(!request.executed, "already executed");
 
         UserInfo storage user = userInfo[who_];
@@ -219,7 +224,7 @@ contract Staking is Ownable, GovernanceToken {
 
         request.executed = true;
 
-        emit Withdraw(who_, request.amount);
+        emit WithdrawReady(who_, request.amount);
     }
 
 

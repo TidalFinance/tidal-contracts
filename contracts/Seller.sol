@@ -388,6 +388,7 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         uint256 payoutId = payoutIdMap[assetIndex_];
 
         require(payoutInfo[assetIndex_][payoutId].toAddress != address(0), "not set");
+        require(userPayoutIdMap[who_][assetIndex_] < payoutId, "Already paid");
 
         userPayoutIdMap[who_][assetIndex_] = payoutId;
 

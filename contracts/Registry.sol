@@ -23,7 +23,6 @@ contract Registry is Ownable, IRegistry {
     address public override seller;
     address public override guarantor;
     address public override bonus;
-    address public override premiumManager;
 
     address public override tidalToken;
     address public override baseToken;
@@ -73,8 +72,8 @@ contract Registry is Ownable, IRegistry {
     }
 
     // Upgradable, in case we want to change premium formula.
-    function setPremiumManager(address premiumManager_) external onlyOwner {
-        premiumManager = premiumManager_;
+    function setPremiumCalculator(address premiumCalculator_) external onlyOwner {
+        premiumCalculator = premiumCalculator_;
     }
 
     // Upgradable.

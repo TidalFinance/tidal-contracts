@@ -12,7 +12,6 @@ interface IRegistry {
     function seller() external view returns(address);
     function guarantor() external view returns(address);
     function bonus() external view returns(address);
-    function premiumManager() external view returns(address);
 
     function tidalToken() external view returns(address);
     function baseToken() external view returns(address);

@@ -369,8 +369,10 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         require(msg.sender == registry.committee(), "Only commitee can call");
 
         require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
-        require(payoutInfo[assetIndex_][payoutId_].total == 0, "already set");
+        require(payoutInfo[assetIndex_][payoutId_].toAddress == address(0), "already set");
         require(total_ <= assetBalance[assetIndex_], "More than asset");
+
+        // total_ can be 0.
 
         payoutInfo[assetIndex_][payoutId_].toAddress = toAddress_;
         payoutInfo[assetIndex_][payoutId_].total = total_;
@@ -383,23 +385,27 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     function doPayout(address who_, uint16 assetIndex_) external {
         require(userBasket[who_][assetIndex_], "must be in basket");
 
-        for (uint256 payoutId = userPayoutIdMap[who_][assetIndex_] + 1; payoutId <= payoutIdMap[assetIndex_]; ++payoutId) {
-            userPayoutIdMap[who_][assetIndex_] = payoutId;
+        uint256 payoutId = payoutIdMap[assetIndex_];
 
-            if (payoutInfo[assetIndex_][payoutId].finished) {
-                continue;
-            }
+        require(payoutInfo[assetIndex_][payoutId].toAddress != address(0), "not set");
 
-            uint8 category = IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_);
-            uint256 amountToPay = userBalance[who_][category].currentBalance.mul(
-                payoutInfo[assetIndex_][payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
+        userPayoutIdMap[who_][assetIndex_] = payoutId;
 
-            userBalance[who_][category].currentBalance = userBalance[who_][category].currentBalance.sub(amountToPay);
-            userBalance[who_][category].futureBalance = userBalance[who_][category].futureBalance.sub(amountToPay);
-            categoryBalance[category] = categoryBalance[category].sub(amountToPay);
-            assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
-            payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
+        if (payoutInfo[assetIndex_][payoutId].finished) {
+            // In case someone paid for the difference.
+            return;
         }
+
+        uint8 category = IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_);
+        uint256 amountToPay = userBalance[who_][category].currentBalance.mul(
+            payoutInfo[assetIndex_][payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
+
+        userBalance[who_][category].currentBalance = userBalance[who_][category].currentBalance.sub(amountToPay);
+        userBalance[who_][category].futureBalance = userBalance[who_][category].futureBalance.sub(amountToPay);
+        categoryBalance[category] = categoryBalance[category].sub(amountToPay);
+        assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
+
+        payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
     }
 
     // This function can be called by anyone as long as he will pay for the difference.
@@ -408,7 +414,7 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         require(!payoutInfo[assetIndex_][payoutId_].finished, "already finished");
 
         if (payoutInfo[assetIndex_][payoutId_].paid < payoutInfo[assetIndex_][payoutId_].total) {
-            // In case there is still small error.
+            // In case you wanna pay for the difference.
             IERC20(registry.baseToken()).safeTransferFrom(
                 msg.sender,
                 address(this),

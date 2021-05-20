@@ -244,8 +244,10 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
         require(msg.sender == registry.committee(), "Only commitee can call");
 
         require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
-        require(payoutInfo[assetIndex_][payoutId_].total == 0, "already set");
+        require(payoutInfo[assetIndex_][payoutId_].toAddress == address(0), "already set");
         require(total_ <= assetBalance[assetIndex_], "More than asset");
+
+        // total_ can be 0.
 
         payoutInfo[assetIndex_][payoutId_].toAddress = toAddress_;
         payoutInfo[assetIndex_][payoutId_].total = total_;
@@ -256,21 +258,24 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
 
     // This function can be called by anyone.
     function doPayout(address who_, uint16 assetIndex_) external {
-        for (uint256 payoutId = userPayoutIdMap[who_][assetIndex_] + 1; payoutId <= payoutIdMap[assetIndex_]; ++payoutId) {
-            userPayoutIdMap[who_][assetIndex_] = payoutId;
+        uint256 payoutId = payoutIdMap[assetIndex_];
+        
+        require(payoutInfo[assetIndex_][payoutId].toAddress != address(0), "not set");
 
-            if (payoutInfo[assetIndex_][payoutId].finished) {
-                continue;
-            }
+        userPayoutIdMap[who_][assetIndex_] = payoutId;
 
-            uint256 amountToPay = userBalance[who_][assetIndex_].currentBalance.mul(
-                payoutInfo[assetIndex_][payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
-
-            userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(amountToPay);
-            userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(amountToPay);
-            assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
-            payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
+        if (payoutInfo[assetIndex_][payoutId].finished) {
+            // In case someone paid for the difference.
+            return;
         }
+
+        uint256 amountToPay = userBalance[who_][assetIndex_].currentBalance.mul(
+            payoutInfo[assetIndex_][payoutId].unitPerShare).div(registry.UNIT_PER_SHARE());
+
+        userBalance[who_][assetIndex_].currentBalance = userBalance[who_][assetIndex_].currentBalance.sub(amountToPay);
+        userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(amountToPay);
+        assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
+        payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
     }
 
     // This function can be called by anyone as long as he will pay for the difference.

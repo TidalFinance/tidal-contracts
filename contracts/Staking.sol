@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
+pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
@@ -342,5 +343,20 @@ contract Staking is Ownable, GovernanceToken, WeekManaged {
 
         fromUser.rewardDebt = fromUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
         toUser.rewardDebt = toUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+    }
+
+    function getWithdrawRequestBackwards(address who_, uint256 offset_, uint256 limit_) external view returns(WithdrawRequest[] memory) {
+        uint256 leftSideOffset = withdrawRequestMap[who_].length.sub(offset_);
+        WithdrawRequest[] memory result = new WithdrawRequest[](leftSideOffset < limit_ ? leftSideOffset : limit_);
+
+        if (withdrawRequestMap[who_].length == 0) {
+            return result;
+        }
+
+        for (uint256 i = withdrawRequestMap[who_].length.sub(1); i >= 0; --i) {
+            result[i] = withdrawRequestMap[who_][i];
+        }
+
+        return result;
     }
 }

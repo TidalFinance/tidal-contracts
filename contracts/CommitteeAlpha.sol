@@ -25,8 +25,10 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     mapping(address => uint256) public memberIndexPlusOne;  // index + 1
 
     uint256 public feeToRequestPayout = 20e18;
+    uint256 public maximumRequestDuration = 3 days;
 
     struct PayoutStartRequest {
+        uint256 time;
         uint16 assetIndex;
         address requester;
         bool executed;
@@ -37,7 +39,6 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     PayoutStartRequest[] public payoutStartRequests;
 
     struct PayoutAmountRequest {
-        uint16 assetIndex;
         address toAddress;
         uint256 sellerAmount;
         uint256 guarantorAmount;
@@ -46,8 +47,8 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         mapping(address => bool) votes;
     }
 
-    // payoutId => PayoutAmountRequest
-    mapping(uint256 => PayoutAmountRequest) public payoutAmountRequestMap;
+    // assetIndex => payoutId => PayoutAmountRequest
+    mapping(uint16 => mapping(uint256 => PayoutAmountRequest)) public payoutAmountRequestMap;
 
     uint256 public commiteeVoteThreshod = 4;
 
@@ -59,6 +60,10 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
     function setFeeToRequestPayout(uint256 fee_) external onlyOwner {
         feeToRequestPayout = fee_;
+    }
+
+    function setMaximumRequestDuration(uint256 duration_) external onlyOwner {
+        maximumRequestDuration = duration_;
     }
 
     function setCommiteeVoteThreshod(uint256 threshold_) external onlyOwner {
@@ -86,12 +91,17 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         return memberIndexPlusOne[who_] > 0;
     }
 
+    function isPayoutStartRequestExpired(uint256 requestIndex_) public view returns(bool) {
+        return now >= payoutStartRequests[requestIndex_].time + maximumRequestDuration;
+    }
+
     // Step 1 (request), anyone pays USDC to request payout.
     function requestPayoutStart(uint16 assetIndex_) external lock {
         IERC20(registry.baseToken()).safeTransferFrom(
-            msg.sender, address(this), feeToRequestPayout);
+            msg.sender, registry.platform(), feeToRequestPayout);
 
         PayoutStartRequest memory request;
+        request.time = now;
         request.assetIndex = assetIndex_;
         request.requester = msg.sender;
         request.executed = false;
@@ -108,6 +118,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         require(isMember(msg.sender), "Requires member");
         require(!request.votes[msg.sender], "Already voted");
         require(!request.executed, "Already executed");
+        require(!isPayoutStartRequestExpired(requestIndex_), "Already expired");
 
         request.votes[msg.sender] = true;
         request.voteCount = request.voteCount.add(1);
@@ -124,25 +135,24 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
     // Step 3 (request), called by timelock (GovernerAlpha).
     function requestPayoutAmount(
-        uint256 payoutId_,
         uint16 assetIndex_,
+        uint256 payoutId_,
         address toAddress_,
         uint256 sellerAmount_,
         uint256 guarantorAmount_
     ) external onlyOwner {
         PayoutAmountRequest memory request;
-        request.assetIndex = assetIndex_;
         request.toAddress = toAddress_;
         request.sellerAmount = sellerAmount_;
         request.guarantorAmount = guarantorAmount_;
         request.executed = false;
         request.voteCount = 0;
-        payoutAmountRequestMap[payoutId_] = request;
+        payoutAmountRequestMap[assetIndex_][payoutId_] = request;
     }
 
     // Step 3 (vote & execute), called by commitee members directly.
-    function confirmPayoutAmountRequest(uint256 payoutId_) external {
-        PayoutAmountRequest storage request = payoutAmountRequestMap[payoutId_];
+    function confirmPayoutAmountRequest(uint16 assetIndex_, uint256 payoutId_) external {
+        PayoutAmountRequest storage request = payoutAmountRequestMap[assetIndex_][payoutId_];
 
         require(isMember(msg.sender), "Requires member");
         require(!request.votes[msg.sender], "Already voted");
@@ -153,9 +163,9 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
         if (request.voteCount >= commiteeVoteThreshod) {
             ISeller(registry.seller()).setPayout(
-                request.assetIndex, payoutId_, request.toAddress, request.sellerAmount);
+                assetIndex_, payoutId_, request.toAddress, request.sellerAmount);
             IGuarantor(registry.guarantor()).setPayout(
-                request.assetIndex, payoutId_, request.toAddress, request.guarantorAmount);
+                assetIndex_, payoutId_, request.toAddress, request.guarantorAmount);
             request.executed = true;
         }
     }

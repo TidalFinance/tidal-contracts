@@ -6,7 +6,7 @@ import './Staking.sol';
 contract StakingHelper {
     using SafeMath for uint;
     
-    Staking staking;
+    Staking public staking;
     
     constructor (address staking_) public {
         staking = Staking(staking_);
@@ -20,15 +20,17 @@ contract StakingHelper {
         assembly {
             id := chainid()
         }
-        if (id == 1) {
-            blockNumber = 2102400;  //15s per block
+        
+        if (id == 1 || id == 3) {
+            blockNumber = 2102400;  // 15s per block, ETH Mainnet And Ropsten Testnet
         } else if (id == 56) {
-            blockNumber = 10512000; //3s per block
-        } else if (id == 137) {
-            blockNumber = 15768000; //2s per block
+            blockNumber = 10512000;  // 3s per block, BSC Mainnet
+        } else if (id == 137 || id == 80001) {
+            blockNumber = 15768000;  // 2s per block, Polygon Mainnet And Mumbai Testnet
         } else {
-           blockNumber = 10512000; //3s per block
+           blockNumber = 2102400;
         }
-        apr = rewardPerBlock.mul(blockNumber) / totalSupply;
+        
+        apr = rewardPerBlock.mul(blockNumber).div(totalSupply);
     }
 }

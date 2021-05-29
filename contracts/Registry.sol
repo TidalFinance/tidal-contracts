@@ -22,6 +22,7 @@ contract Registry is Ownable, IRegistry {
     address public override buyer;
     address public override seller;
     address public override guarantor;
+    address public override staking;
     address public override bonus;
 
     address public override tidalToken;
@@ -49,6 +50,11 @@ contract Registry is Ownable, IRegistry {
     function setGuarantor(address guarantor_) external onlyOwner {
         require(guarantor == address(0), "Can set only once");
         guarantor = guarantor_;
+    }
+
+    // Upgradable, in case we want to change staking pool.
+    function setStaking(address staking_) external onlyOwner {
+        staking = staking_;
     }
 
     // Upgradable, in case we want to change mining algorithm.

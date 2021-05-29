@@ -11,9 +11,10 @@ import "./WeekManaged.sol";
 
 import "./tokens/GovernanceToken.sol";
 import "./interfaces/IRegistry.sol";
+import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is Ownable, GovernanceToken, WeekManaged {
+contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -256,12 +257,16 @@ contract Staking is Ownable, GovernanceToken, WeekManaged {
         return payoutId > 0 && !payoutInfo[payoutId].finished;
     }
 
-    function startPayout(uint256 payoutId_) external onlyOwner {
+    function startPayout(uint256 payoutId_) external override {
+        require(msg.sender == registry.committee(), "Only commitee can call");
+
         require(payoutId_ == payoutId + 1, "payoutId should be increasing");
         payoutId = payoutId_;
     }
 
-    function setPayout(uint256 payoutId_, address toAddress_, uint256 total_) external onlyOwner {
+    function setPayout(uint256 payoutId_, address toAddress_, uint256 total_) external override {
+        require(msg.sender == registry.committee(), "Only commitee can call");
+
         require(payoutId_ == payoutId, "payoutId should be started");
         require(payoutInfo[payoutId_].total == 0, "already set");
 

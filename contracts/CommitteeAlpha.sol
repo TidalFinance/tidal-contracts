@@ -11,7 +11,7 @@ import "./NonReentrancy.sol";
 import "./interfaces/IGuarantor.sol";
 import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
-
+import "./interfaces/IStaking.sol";
 
 // Owned by Timelock, and Timelock is owned by GovernerAlpha
 contract CommitteeAlpha is Ownable, NonReentrancy {
@@ -42,6 +42,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         address toAddress;
         uint256 sellerAmount;
         uint256 guarantorAmount;
+        uint256 stakingAmount;
         bool executed;
         uint256 voteCount;
         mapping(address => bool) votes;
@@ -126,6 +127,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         if (request.voteCount >= commiteeVoteThreshod) {
             ISeller(registry.seller()).startPayout(request.assetIndex, payoutId_);
             IGuarantor(registry.guarantor()).startPayout(request.assetIndex, payoutId_);
+            IStaking(registry.staking()).startPayout(payoutId_);
             request.executed = true;
         }
     }
@@ -139,12 +141,14 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
         uint256 payoutId_,
         address toAddress_,
         uint256 sellerAmount_,
-        uint256 guarantorAmount_
+        uint256 guarantorAmount_,
+        uint256 stakingAmount_
     ) external onlyOwner {
         PayoutAmountRequest memory request;
         request.toAddress = toAddress_;
         request.sellerAmount = sellerAmount_;
         request.guarantorAmount = guarantorAmount_;
+        request.stakingAmount = stakingAmount_;
         request.executed = false;
         request.voteCount = 0;
         payoutAmountRequestMap[assetIndex_][payoutId_] = request;
@@ -166,6 +170,8 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
                 assetIndex_, payoutId_, request.toAddress, request.sellerAmount);
             IGuarantor(registry.guarantor()).setPayout(
                 assetIndex_, payoutId_, request.toAddress, request.guarantorAmount);
+            IStaking(registry.staking()).setPayout(
+                payoutId_, request.toAddress, request.stakingAmount);
             request.executed = true;
         }
     }

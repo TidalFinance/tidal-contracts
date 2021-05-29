@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "./interfaces/IAssetManager.sol";
 
-
 // This contract is owned by Timelock.
 contract AssetManager is IAssetManager, Ownable {
 
@@ -15,9 +14,15 @@ contract AssetManager is IAssetManager, Ownable {
         bool deprecated;
     }
 
+    uint8 public categoryLength;
+
     Asset[] public assets;  // Every asset have a unique index.
 
     mapping(uint8 => uint16[]) private indexesByCategory;
+
+    function setCategoryLength(uint8 length_) external onlyOwner {
+        categoryLength = length_;
+    }
 
     function setAsset(uint16 index_, address token_, uint8 category_) external onlyOwner {
         if (index_ < assets.length) {
@@ -47,7 +52,7 @@ contract AssetManager is IAssetManager, Ownable {
     }
 
     function getCategoryLength() external override view returns(uint8) {
-        return 3;  // May update in the future.
+        return categoryLength;
     }
 
     function getAssetLength() external override view returns(uint256) {

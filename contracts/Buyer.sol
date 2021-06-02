@@ -7,12 +7,12 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./NonReentrancy.sol";
-import "./PremiumCalculator.sol";
 import "./WeekManaged.sol";
 
 import "./interfaces/IAssetManager.sol";
 import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
+import "./interfaces/IPremiumCalculator.sol";
 import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
 
@@ -53,7 +53,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     mapping(uint16 => uint256) public assetSubscription;
 
     // assetIndex => utilization
-    mapping(uint16 => uint256) public assetUtilization;
+    mapping(uint16 => uint256) public override assetUtilization;
 
     // assetIndex => total
     mapping(uint16 => uint256) public override premiumForGuarantor;
@@ -70,9 +70,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     }
 
     function getPremiumRate(uint16 assetIndex_) public view returns(uint256) {
-        uint8 category = IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_);
-        return PremiumCalculator(registry.premiumCalculator()).getPremiumRate(
-            category, assetUtilization[assetIndex_]);
+        return IPremiumCalculator(registry.premiumCalculator()).getPremiumRate(
+            assetIndex_);
     }
 
     function isUserCovered(address who_) public override view returns(bool) {

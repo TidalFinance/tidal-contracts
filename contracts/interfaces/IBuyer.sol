@@ -7,6 +7,7 @@ interface IBuyer {
     function weekToUpdate() external view returns(uint256);
     function currentSubscription(address who_, uint16 assetIndex_) external view returns(uint256);
     function futureSubscription(address who_, uint16 assetIndex_) external view returns(uint256);
+    function assetUtilization(uint16 assetIndex_) external view returns(uint256);
     function isUserCovered(address who_) external view returns(bool);
     function updateBonus(uint16 assetIndex_, uint256 amount_) external;
 }

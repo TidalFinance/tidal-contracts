@@ -34,7 +34,24 @@ contract GovernorAlpha {
     function votingDelay() public pure returns (uint) { return 1; } // 1 block
 
     /// @notice The duration of voting on a proposal, in blocks
-    function votingPeriod() public pure returns (uint) { return 17280; } // ~3 days in blocks (assuming 15s blocks)
+    function votingPeriod() public view returns (uint) {
+        uint256 id;
+        assembly {
+            id := chainid()
+        }
+
+        // ~3 days in blocks 
+
+        if (id == 1 || id == 3) {  // ETH Mainnet / Ropsten, 15s per block
+            return 17280;
+        } else if (id == 56 || id == 97) {  // BSC Mainnet / Testnet, 3s per block
+            return 86400;
+        } else if (id == 137 || id == 80001) {  // Polygon Mainnet / Testnet, 2s per block
+            return 129600;
+        } else {
+            return 17280;
+        }
+    }
 
     /// @notice The address of the Compound Protocol Timelock
     TimelockInterface public timelock;

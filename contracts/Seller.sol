@@ -296,7 +296,8 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
         // Even asset locked, user can still reduce.
 
         require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
-        require(userBalance[msg.sender][category_].futureBalance >= amount_, "Not enough future balance");
+        require(amount_ <= userBalance[msg.sender][category_].futureBalance.sub(
+            userBalance[msg.sender][category_].currentBalance), "Not enough future balance");
 
         IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
 

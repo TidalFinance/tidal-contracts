@@ -115,7 +115,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     // Step 1 (vote & execute), called by commitee members directly.
     // The last caller needs to provide a correct payoutId (not hard figure it out),
     // otherwise it reverts.
-    function confirmPayoutStartRequest(uint256 requestIndex_, uint256 payoutId_) external {
+    function confirmPayoutStartRequest(uint256 requestIndex_, uint256 payoutId_) external lock {
         PayoutStartRequest storage request = payoutStartRequests[requestIndex_];
 
         require(isMember(msg.sender), "Requires member");
@@ -157,7 +157,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     }
 
     // Step 3 (vote & execute), called by commitee members directly.
-    function confirmPayoutAmountRequest(uint16 assetIndex_, uint256 payoutId_) external {
+    function confirmPayoutAmountRequest(uint16 assetIndex_, uint256 payoutId_) external lock {
         PayoutAmountRequest storage request = payoutAmountRequestMap[assetIndex_][payoutId_];
 
         require(isMember(msg.sender), "Requires member");

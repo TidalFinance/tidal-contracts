@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./NonReentrancy.sol";
 import "./WeekManaged.sol";
 
 import "./tokens/GovernanceToken.sol";
@@ -14,7 +15,7 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged {
+contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentrancy {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -158,7 +159,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged {
         poolInfo.lastRewardBlock = block.number;
     }
 
-    function deposit(uint256 amount_) external {
+    function deposit(uint256 amount_) external lock {
         require(!hasPendingPayout(), "Has pending payout");
 
         UserInfo storage user = userInfo[msg.sender];
@@ -199,7 +200,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged {
         emit Withdraw(msg.sender, amount_);
     }
 
-    function withdrawReady(address who_, uint256 index_) external {
+    function withdrawReady(address who_, uint256 index_) external lock {
         WithdrawRequest storage request = withdrawRequestMap[who_][index_];
 
         require(request.time > 0, "Non-existing request");

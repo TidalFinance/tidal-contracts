@@ -72,17 +72,19 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     }
 
     function addMember(address who_) external onlyOwner {
+        require(memberIndexPlusOne[who_] == 0, "Already a member");
         members.push(who_);
         memberIndexPlusOne[who_] = members.length;
     }
 
     function removeMember(address who_) external onlyOwner {
         uint256 indexPlusOne = memberIndexPlusOne[who_];
-        require(indexPlusOne > 0, "Invalid address");
+        require(indexPlusOne > 0, "Invalid address / not a member");
         require(indexPlusOne <= members.length, "Out of range");
         if (indexPlusOne < members.length) {
             members[indexPlusOne.sub(1)] = members[members.length.sub(1)];
             memberIndexPlusOne[members[indexPlusOne.sub(1)]] = indexPlusOne;
+            memberIndexPlusOne[who_] = 0;
         }
 
         members.pop();

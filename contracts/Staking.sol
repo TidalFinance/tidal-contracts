@@ -54,6 +54,9 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     // who => WithdrawRequest[]
     mapping(address => WithdrawRequest[]) public withdrawRequestMap;
 
+    // who => amount
+    mapping(address => uint256) public withdrawAmountMap;
+
     uint256 public withdrawWaitTime = 14 days;
 
     IRegistry public registry;
@@ -189,13 +192,16 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         require(!hasPendingPayout(), "Has pending payout");
 
         uint256 userAmount = balanceOf(msg.sender);
-        require(userAmount >= amount_, "Not enough amount");
+        require(userAmount >= withdrawAmountMap[msg.sender].add(amount_), "Not enough amount");
 
         withdrawRequestMap[msg.sender].push(WithdrawRequest({
             time: getCurrentWeek(),
             amount: amount_,
             executed: false
         }));
+
+        // Updates total withdraw amount in pending.
+        withdrawAmountMap[msg.sender] = withdrawAmountMap[msg.sender].add(amount_);
 
         emit Withdraw(msg.sender, amount_);
     }
@@ -226,6 +232,9 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         IERC20(registry.tidalToken()).transfer(address(who_), request.amount);
 
         request.executed = true;
+
+        // Updates total withdraw amount in pending.
+        withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
 
         emit WithdrawReady(who_, request.amount);
     }

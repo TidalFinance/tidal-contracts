@@ -22,11 +22,11 @@ contract StakingHelper {
         }
         
         if (id == 1 || id == 3) {
-            blockNumber = 2102400;  // 15s per block, ETH Mainnet And Ropsten Testnet
-        } else if (id == 56) {
-            blockNumber = 10512000;  // 3s per block, BSC Mainnet
+            blockNumber = 2102400;  // 15s per block, ETH Mainnet and Testnets
+        } else if (id == 56 || id == 97) {
+            blockNumber = 10512000;  // 3s per block, BSC Mainnet and Testnet
         } else if (id == 137 || id == 80001) {
-            blockNumber = 15768000;  // 2s per block, Polygon Mainnet And Mumbai Testnet
+            blockNumber = 15768000;  // 2s per block, Polygon Mainnet and Mumbai Testnet
         } else {
            blockNumber = 2102400;
         }

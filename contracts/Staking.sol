@@ -361,15 +361,18 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     }
 
     function getWithdrawRequestBackwards(address who_, uint256 offset_, uint256 limit_) external view returns(WithdrawRequest[] memory) {
+        if (withdrawRequestMap[who_].length <= offset_) {
+            return new WithdrawRequest[](0);
+        }
+
         uint256 leftSideOffset = withdrawRequestMap[who_].length.sub(offset_);
         WithdrawRequest[] memory result = new WithdrawRequest[](leftSideOffset < limit_ ? leftSideOffset : limit_);
 
-        if (withdrawRequestMap[who_].length == 0) {
-            return result;
-        }
-
-        for (uint256 i = withdrawRequestMap[who_].length.sub(1); i >= 0; --i) {
-            result[i] = withdrawRequestMap[who_][i];
+        uint256 i = 0;
+        while (i < limit_ && leftSideOffset > 0) {
+            leftSideOffset = leftSideOffset.sub(1);
+            result[i] = withdrawRequestMap[who_][leftSideOffset];
+            i = i.add(1);
         }
 
         return result;

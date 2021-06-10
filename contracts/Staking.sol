@@ -195,7 +195,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         require(userAmount >= withdrawAmountMap[msg.sender].add(amount_), "Not enough amount");
 
         withdrawRequestMap[msg.sender].push(WithdrawRequest({
-            time: getCurrentWeek(),
+            time: getNow(),
             amount: amount_,
             executed: false
         }));
@@ -210,7 +210,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         WithdrawRequest storage request = withdrawRequestMap[who_][index_];
 
         require(request.time > 0, "Non-existing request");
-        require(getCurrentWeek() > request.time.add(withdrawWaitTime), "Not ready yet");
+        require(getNow() > request.time.add(withdrawWaitTime), "Not ready yet");
         require(!request.executed, "already executed");
 
         UserInfo storage user = userInfo[who_];

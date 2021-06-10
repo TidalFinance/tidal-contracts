@@ -109,7 +109,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         view
         returns (uint256)
     {
-        if (to_ <= from_) {
+        if (to_ <= from_ || from_ >= poolInfo.endBlock || to_ <= poolInfo.startBlock) {
             return 0;
         }
 

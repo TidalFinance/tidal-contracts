@@ -21,10 +21,7 @@ contract Bonus is IBonus, Ownable, WeekManaged {
 
     uint256 public bonusPerAssetOfG = 500e18;
     uint256 public bonusPerAssetOfS = 3500e18;
-    uint256 public bonusPerAssetOfB = 1000e18;
 
-    // assetIndex => week
-    mapping(uint16 => uint256) public buyerWeek;
     // assetIndex => week
     mapping(uint16 => uint256) public sellerWeek;
     // assetIndex => week
@@ -44,20 +41,6 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         bonusPerAssetOfS = value_;
     }
 
-    function setBonusPerAssetOfB(uint256 value_) external onlyOwner {
-        bonusPerAssetOfB = value_;
-    }
-
-    function updateBuyerBonus(uint16 assetIndex_) external {
-        uint256 currentWeek = getCurrentWeek();
-        require(buyerWeek[assetIndex_] < currentWeek, "Already updated");
-
-        IERC20(registry.tidalToken()).approve(registry.buyer(), bonusPerAssetOfB);
-        IBuyer(registry.buyer()).updateBonus(assetIndex_, bonusPerAssetOfB);
-
-        buyerWeek[assetIndex_] = currentWeek;
-    }
-
     function updateSellerBonus(uint16 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
         require(sellerWeek[assetIndex_] < currentWeek, "Already updated");
@@ -72,7 +55,7 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         uint256 currentWeek = getCurrentWeek();
         require(guarantorWeek[assetIndex_] < currentWeek, "Already updated");
 
-        IERC20(registry.tidalToken()).approve(registry.guarantor(), bonusPerAssetOfB);
+        IERC20(registry.tidalToken()).approve(registry.guarantor(), bonusPerAssetOfG);
         IGuarantor(registry.guarantor()).updateBonus(assetIndex_, bonusPerAssetOfG);
 
         guarantorWeek[assetIndex_] = currentWeek;

@@ -25,32 +25,20 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     IRegistry public registry;
 
-    struct PoolInfo {
-        uint256 weekOfBonus;
-        uint256 bonusPerShare;
-    }
-
-    // assetIndex => PoolInfo
-    mapping(uint16 => PoolInfo) public poolInfo;
-
     struct UserInfo {
         uint256 balance;
         uint256 weekBegin;  // The week the coverage begin
         uint256 weekEnd;  // The week the coverage end
         uint256 weekUpdated;  // The week that balance was updated
-        uint256 bonus;
     }
 
     mapping(address => UserInfo) public userInfoMap;
 
-    // user => assetIndex => amount
-    mapping(address => mapping(uint16 => uint256)) public override currentSubscription;
+    // assetIndex => amount
+    mapping(uint16 => uint256) public override currentSubscription;
 
-    // user => assetIndex => amount
-    mapping(address => mapping(uint16 => uint256)) public override futureSubscription;
-
-    // assetIndex => total
-    mapping(uint16 => uint256) public assetSubscription;
+    // assetIndex => amount
+    mapping(uint16 => uint256) public override futureSubscription;
 
     // assetIndex => utilization
     mapping(uint16 => uint256) public override assetUtilization;
@@ -60,6 +48,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     // assetIndex => total
     mapping(uint16 => uint256) public override premiumForSeller;
+
+    // Should be claimed immediately in the next week.
+    // assetIndex => total
+    mapping(uint16 => uint256) public premiumToRefund;
 
     uint256 public override weekToUpdate;
 
@@ -78,33 +70,30 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
         return userInfoMap[who_].weekEnd == getCurrentWeek();
     }
 
-    function getTotalFuturePremium(address who_) public view returns(uint256) {
-        uint256 total = 0;
-        for (uint16 index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
-            if (futureSubscription[who_][index] > 0) {
-                total = total.add(futureSubscription[who_][index].mul(getPremiumRate(index)).div(registry.PREMIUM_BASE()));
-            }
-        }
-
-        return total;
-    }
-
     function getBalance(address who_) public view returns(uint256) {
         return userInfoMap[who_].balance;
     }
 
-    function getUtilization(uint16 assetIndex_) public view returns(uint256) {
+    function _refundAndUtilize(uint16 assetIndex_) private {
         uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
 
+        // Maybe refund to buyer if over-subscribed in the past week, with past premium rate (assetUtilization).
+        if (currentSubscription[assetIndex_] > sellerAssetBalance) {
+            premiumToRefund[assetIndex_] = currentSubscription[assetIndex_].sub(sellerAssetBalance).mul(
+                getPremiumRate(assetIndex_)).div(registry.PREMIUM_BASE());
+
+            // Reduce currentSubscription (not too late).
+            currentSubscription[assetIndex_] = sellerAssetBalance;
+        }
+
+        // Calculate new assetUtilization from currentSubscription and sellerAssetBalance
         if (sellerAssetBalance == 0) {
-            return 0;
+            assetUtilization[assetIndex_] = registry.UTILIZATION_BASE();
+        } else {
+            assetUtilization[assetIndex_] = currentSubscription[assetIndex_] * registry.UTILIZATION_BASE() / sellerAssetBalance;
         }
 
-        if (assetSubscription[assetIndex_] > sellerAssetBalance) {
-            return registry.UTILIZATION_BASE();
-        }
-
-        return assetSubscription[assetIndex_] * registry.UTILIZATION_BASE() / sellerAssetBalance;
+        // Premium rate also changed.
     }
 
     // Called every week.
@@ -122,7 +111,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
             for (uint16 index = 0;
                     index < IAssetManager(registry.assetManager()).getAssetLength();
                     ++index) {
-                uint256 premiumOfAsset = assetSubscription[index].mul(
+                _refundAndUtilize(index);
+
+                uint256 premiumOfAsset = currentSubscription[index].mul(
                     getPremiumRate(index)).div(registry.PREMIUM_BASE());
 
                 premiumForGuarantor[index] = premiumOfAsset.mul(
@@ -136,9 +127,6 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
                     registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
                         registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
                 totalForSeller = totalForSeller.add(premiumForSeller[index]);
-
-                // Calculate assetUtilization from assetSubscription and seller.assetBalance
-                assetUtilization[index] = getUtilization(index);
             }
 
             IERC20(registry.baseToken()).safeTransfer(registry.platform(), feeForPlatform);
@@ -151,46 +139,22 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
         weekToUpdate = currentWeek;
     }
 
-    // Update and pay last week's bonus.
-    function updateBonus(uint16 assetIndex_, uint256 amount_) external lock override {
-        require(msg.sender == registry.bonus(), "Only Bonus can call");
-
-        uint256 currentWeek = getCurrentWeek();
-
-        require(currentWeek == weekToUpdate, "Not ready to update");
-        require(poolInfo[assetIndex_].weekOfBonus < currentWeek, "already updated");
-
-        if (assetSubscription[assetIndex_] > 0) {
-            IERC20(registry.tidalToken()).safeTransferFrom(msg.sender, address(this), amount_);
-            poolInfo[assetIndex_].bonusPerShare = amount_.mul(
-                registry.UNIT_PER_SHARE()).div(assetSubscription[assetIndex_]);
-        }
-
-        poolInfo[assetIndex_].weekOfBonus = currentWeek;
-
-        // HACK: Now reset, because it's useless and we will re-sum it later.
-        assetSubscription[assetIndex_] = 0;
-    }
-
     // Called for every user every week.
     function update(address who_) external {
         uint256 currentWeek = getCurrentWeek();
 
+        require(registry.hasBuyerAssetIndex(who_), "not whitelisted buyer");
+        uint16 buyerAssetIndex = registry.getBuyerAssetIndex(who_);
+
         require(currentWeek == weekToUpdate, "Not ready to update");
         require(userInfoMap[who_].weekUpdated < currentWeek, "Already updated");
 
-        uint16 index;
-
-        // Check bonus.
-        for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
-            require(poolInfo[index].weekOfBonus == currentWeek, "Not ready");
-        }
-
         // Get per user premium
-        uint256 cost = getTotalFuturePremium(who_);
+        uint256 premium = futureSubscription[buyerAssetIndex].mul(
+                getPremiumRate(buyerAssetIndex)).div(registry.PREMIUM_BASE());
 
-        if (userInfoMap[who_].balance >= cost) {
-            userInfoMap[who_].balance = userInfoMap[who_].balance.sub(cost);
+        if (userInfoMap[who_].balance >= premium) {
+            userInfoMap[who_].balance = userInfoMap[who_].balance.sub(premium);
 
             if (userInfoMap[who_].weekBegin == 0 ||
                     userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
@@ -199,25 +163,14 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
             userInfoMap[who_].weekEnd = currentWeek;
 
-            for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
-                // Update user bonus.
-                userInfoMap[who_].bonus = userInfoMap[who_].bonus.add(currentSubscription[who_][index].mul(
-                    poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
-
-                if (futureSubscription[who_][index] > 0) {
-                    currentSubscription[who_][index] = futureSubscription[who_][index];
-
-                    // Update per asset premium
-                    assetSubscription[index] = assetSubscription[index].add(
-                            futureSubscription[who_][index]);
-                } else if (currentSubscription[who_][index] > 0) {
-                    currentSubscription[who_][index] = 0;
-                }
+            if (futureSubscription[buyerAssetIndex] > 0) {
+                currentSubscription[buyerAssetIndex] = futureSubscription[buyerAssetIndex];
+            } else if (currentSubscription[buyerAssetIndex] > 0) {
+                currentSubscription[buyerAssetIndex] = 0;
             }
         } else {
             // Stops user's subscription.
-            // We don't need to do anything.
-            // Even though user has currentSubscription and futureSubscription, he is not covered.
+            currentSubscription[buyerAssetIndex] = 0;
         }
 
         userInfoMap[who_].weekUpdated = currentWeek;  // This week.
@@ -225,6 +178,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     // Deposit
     function deposit(uint256 amount_) external lock {
+        require(registry.hasBuyerAssetIndex(msg.sender), "not whitelisted buyer");
+
         IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
     }
@@ -237,15 +192,14 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
-        futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].add(amount_);
+        require(registry.getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
+
+        futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);
     }
 
     function unsubscribe(uint16 assetIndex_, uint256 amount_) external {
-        futureSubscription[msg.sender][assetIndex_] = futureSubscription[msg.sender][assetIndex_].sub(amount_);
-    }
+        require(registry.getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
 
-    function claimBonus() external lock {
-        IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfoMap[msg.sender].bonus);
-        userInfoMap[msg.sender].bonus = 0;
+        futureSubscription[assetIndex_] = futureSubscription[assetIndex_].sub(amount_);
     }
 }

@@ -118,7 +118,7 @@ contract Guarantor is IGuarantor, Ownable, WeekManaged, NonReentrancy {
     }
 
     // Called for every user every week.
-    function update(address who_) external {
+    function update(address who_) external override {
         uint256 week = getCurrentWeek();
 
         require(userInfo[who_].week < week, "Already updated");

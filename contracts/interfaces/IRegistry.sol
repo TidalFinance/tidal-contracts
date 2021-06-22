@@ -25,4 +25,7 @@ interface IRegistry {
 
     function governor() external view returns(address);
     function committee() external view returns(address);
+
+    function getBuyerAssetIndex(address who_) external view returns(uint16);
+    function hasBuyerAssetIndex(address who_) external view returns(bool);
 }

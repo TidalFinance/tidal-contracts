@@ -226,7 +226,7 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     }
 
     // Called for every user every week.
-    function update(address who_) external {
+    function update(address who_) external override {
         // Update user's last week's premium and bonus.
         uint256 week = getCurrentWeek();
 

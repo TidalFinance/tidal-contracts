@@ -19,8 +19,8 @@ contract Bonus is IBonus, Ownable, WeekManaged {
 
     IRegistry public registry;
 
-    uint256 public bonusPerAssetOfG = 500e18;
-    uint256 public bonusPerAssetOfS = 3500e18;
+    mapping(uint16 => uint256) public bonusPerAssetOfG;
+    mapping(uint16 => uint256) public bonusPerAssetOfS;
 
     // assetIndex => week
     mapping(uint16 => uint256) public sellerWeek;
@@ -33,20 +33,20 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         registry = registry_;
     }
 
-    function setBonusPerAssetOfG(uint256 value_) external onlyOwner {
-        bonusPerAssetOfG = value_;
+    function setBonusPerAssetOfG(uint16 assetIndex_, uint256 value_) external onlyOwner {
+        bonusPerAssetOfG[assetIndex_] = value_;
     }
 
-    function setBonusPerAssetOfS(uint256 value_) external onlyOwner {
-        bonusPerAssetOfS = value_;
+    function setBonusPerAssetOfS(uint16 assetIndex_, uint256 value_) external onlyOwner {
+        bonusPerAssetOfS[assetIndex_] = value_;
     }
 
     function updateSellerBonus(uint16 assetIndex_) external {
         uint256 currentWeek = getCurrentWeek();
         require(sellerWeek[assetIndex_] < currentWeek, "Already updated");
 
-        IERC20(registry.tidalToken()).approve(registry.seller(), bonusPerAssetOfS);
-        ISeller(registry.seller()).updateBonus(assetIndex_, bonusPerAssetOfS);
+        IERC20(registry.tidalToken()).approve(registry.seller(), bonusPerAssetOfS[assetIndex_]);
+        ISeller(registry.seller()).updateBonus(assetIndex_, bonusPerAssetOfS[assetIndex_]);
 
         sellerWeek[assetIndex_] = currentWeek;
     }
@@ -55,8 +55,8 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         uint256 currentWeek = getCurrentWeek();
         require(guarantorWeek[assetIndex_] < currentWeek, "Already updated");
 
-        IERC20(registry.tidalToken()).approve(registry.guarantor(), bonusPerAssetOfG);
-        IGuarantor(registry.guarantor()).updateBonus(assetIndex_, bonusPerAssetOfG);
+        IERC20(registry.tidalToken()).approve(registry.guarantor(), bonusPerAssetOfG[assetIndex_]);
+        IGuarantor(registry.guarantor()).updateBonus(assetIndex_, bonusPerAssetOfG[assetIndex_]);
 
         guarantorWeek[assetIndex_] = currentWeek;
     }

@@ -37,9 +37,6 @@ contract Registry is Ownable, IRegistry {
     address public override governor;
     address public override committee;
 
-    // who => assetIndex + 1
-    mapping(address => uint16) private buyerAssetIndexPlusOne;
-
     function setBuyer(address buyer_) external onlyOwner {
         require(buyer == address(0), "Can set only once");
         buyer = buyer_;
@@ -110,22 +107,5 @@ contract Registry is Ownable, IRegistry {
     // Upgradable.
     function setCommittee(address committee_) external onlyOwner {
         committee = committee_;
-    }
-
-    // Set buyer asset index
-    function setBuyerAssetIndex(address who_, uint16 assetIndex_) external onlyOwner {
-        // No safe math for uint16, but please make sure no overflow.
-        buyerAssetIndexPlusOne[who_] = assetIndex_ + 1;
-    }
-
-    // Get buyer asset index
-    function getBuyerAssetIndex(address who_) external override view returns(uint16) {
-        require(buyerAssetIndexPlusOne[who_] > 0, "No asset index");
-        return buyerAssetIndexPlusOne[who_] - 1;
-    }
-
-    // Has buyer asset index
-    function hasBuyerAssetIndex(address who_) external override view returns(bool) {
-        return buyerAssetIndexPlusOne[who_] > 0;
     }
 }

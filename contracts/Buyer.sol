@@ -55,10 +55,30 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     uint256 public override weekToUpdate;
 
+    // who => assetIndex + 1
+    mapping(address => uint16) public buyerAssetIndexPlusOne;
+
     constructor () public { }
 
     function setRegistry(IRegistry registry_) external onlyOwner {
         registry = registry_;
+    }
+
+    // Set buyer asset index
+    function setBuyerAssetIndex(address who_, uint16 assetIndex_) external onlyOwner {
+        // No safe math for uint16, but please make sure no overflow.
+        buyerAssetIndexPlusOne[who_] = assetIndex_ + 1;
+    }
+
+    // Get buyer asset index
+    function getBuyerAssetIndex(address who_) public view returns(uint16) {
+        require(buyerAssetIndexPlusOne[who_] > 0, "No asset index");
+        return buyerAssetIndexPlusOne[who_] - 1;
+    }
+
+    // Has buyer asset index
+    function hasBuyerAssetIndex(address who_) public view returns(bool) {
+        return buyerAssetIndexPlusOne[who_] > 0;
     }
 
     function getPremiumRate(uint16 assetIndex_) public view returns(uint256) {
@@ -143,8 +163,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     function update(address who_) external {
         uint256 currentWeek = getCurrentWeek();
 
-        require(registry.hasBuyerAssetIndex(who_), "not whitelisted buyer");
-        uint16 buyerAssetIndex = registry.getBuyerAssetIndex(who_);
+        require(hasBuyerAssetIndex(who_), "not whitelisted buyer");
+        uint16 buyerAssetIndex = getBuyerAssetIndex(who_);
 
         require(currentWeek == weekToUpdate, "Not ready to update");
         require(userInfoMap[who_].weekUpdated < currentWeek, "Already updated");
@@ -178,7 +198,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     // Deposit
     function deposit(uint256 amount_) external lock {
-        require(registry.hasBuyerAssetIndex(msg.sender), "not whitelisted buyer");
+        require(hasBuyerAssetIndex(msg.sender), "not whitelisted buyer");
 
         IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
         userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
@@ -192,13 +212,13 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
-        require(registry.getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
+        require(getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);
     }
 
     function unsubscribe(uint16 assetIndex_, uint256 amount_) external {
-        require(registry.getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
+        require(getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].sub(amount_);
     }

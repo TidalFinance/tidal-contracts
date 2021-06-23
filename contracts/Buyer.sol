@@ -104,6 +104,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
             // Reduce currentSubscription (not too late).
             currentSubscription[assetIndex_] = sellerAssetBalance;
+        } else {
+            // No need to refund.
+            premiumToRefund[assetIndex_] = 0;
         }
 
         // Calculate new assetUtilization from currentSubscription and sellerAssetBalance
@@ -168,6 +171,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
         require(currentWeek == weekToUpdate, "Not ready to update");
         require(userInfoMap[who_].weekUpdated < currentWeek, "Already updated");
+
+        // Maybe refund to user.
+        userInfoMap[who_].balance = userInfoMap[who_].balance.add(premiumToRefund[buyerAssetIndex]);
 
         // Get per user premium
         uint256 premium = futureSubscription[buyerAssetIndex].mul(

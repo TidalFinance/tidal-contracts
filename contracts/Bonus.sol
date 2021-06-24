@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import "./WeekManaged.sol";
+import "./common/WeekManaged.sol";
 
 import "./interfaces/IBonus.sol";
 import "./interfaces/IBuyer.sol";

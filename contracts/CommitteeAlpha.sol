@@ -6,9 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import "./BaseRelayRecipient.sol";
-
-import "./NonReentrancy.sol";
+import "./common/BaseRelayRecipient.sol";
+import "./common/NonReentrancy.sol";
 
 import "./interfaces/IGuarantor.sol";
 import "./interfaces/IRegistry.sol";

@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./BaseRelayRecipient.sol";
+
 import "./NonReentrancy.sol";
 import "./WeekManaged.sol";
 
@@ -18,10 +20,12 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
+contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
+
+    string public override versionRecipient = "1.0.0";
 
     IRegistry public registry;
 
@@ -58,10 +62,20 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
     // who => assetIndex + 1
     mapping(address => uint16) public buyerAssetIndexPlusOne;
 
-    constructor () public { }
-
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) public {
         registry = registry_;
+    }
+
+    function _timeExtra() internal override view returns(uint256) {
+        return registry.timeExtra();
+    }
+
+    function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {
+        return BaseRelayRecipient._msgSender();
+    }
+
+    function _trustedForwarder() internal override view returns(address) {
+        return registry.trustedForwarder();
     }
 
     // Set buyer asset index
@@ -204,27 +218,27 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy {
 
     // Deposit
     function deposit(uint256 amount_) external lock {
-        require(hasBuyerAssetIndex(msg.sender), "not whitelisted buyer");
+        require(hasBuyerAssetIndex(_msgSender()), "not whitelisted buyer");
 
-        IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
-        userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.add(amount_);
+        IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
+        userInfoMap[_msgSender()].balance = userInfoMap[_msgSender()].balance.add(amount_);
     }
 
     // Withdraw
     function withdraw(uint256 amount_) external lock {
-        require(userInfoMap[msg.sender].balance >= amount_, "not enough balance");
-        IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
-        userInfoMap[msg.sender].balance = userInfoMap[msg.sender].balance.sub(amount_);
+        require(userInfoMap[_msgSender()].balance >= amount_, "not enough balance");
+        IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
+        userInfoMap[_msgSender()].balance = userInfoMap[_msgSender()].balance.sub(amount_);
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
-        require(getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
+        require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);
     }
 
     function unsubscribe(uint16 assetIndex_, uint256 amount_) external {
-        require(getBuyerAssetIndex(msg.sender) == assetIndex_, "not whitelisted buyer and assetIndex");
+        require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].sub(amount_);
     }

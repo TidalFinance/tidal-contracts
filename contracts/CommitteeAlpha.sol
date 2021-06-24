@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./BaseRelayRecipient.sol";
+
 import "./NonReentrancy.sol";
 
 import "./interfaces/IGuarantor.sol";
@@ -14,10 +16,12 @@ import "./interfaces/ISeller.sol";
 import "./interfaces/IStaking.sol";
 
 // Owned by Timelock, and Timelock is owned by GovernerAlpha
-contract CommitteeAlpha is Ownable, NonReentrancy {
+contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+
+    string public override versionRecipient = "1.0.0";
 
     IRegistry public registry;
 
@@ -53,10 +57,16 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
 
     uint256 public commiteeVoteThreshod = 4;
 
-    constructor () public { }
-
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) public {
         registry = registry_;
+    }
+
+    function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {
+        return BaseRelayRecipient._msgSender();
+    }
+
+    function _trustedForwarder() internal override view returns(address) {
+        return registry.trustedForwarder();
     }
 
     function setFeeToRequestPayout(uint256 fee_) external onlyOwner {
@@ -101,12 +111,12 @@ contract CommitteeAlpha is Ownable, NonReentrancy {
     // Step 1 (request), anyone pays USDC to request payout.
     function requestPayoutStart(uint16 assetIndex_) external lock {
         IERC20(registry.baseToken()).safeTransferFrom(
-            msg.sender, registry.platform(), feeToRequestPayout);
+            _msgSender(), registry.platform(), feeToRequestPayout);
 
         PayoutStartRequest memory request;
         request.time = now;
         request.assetIndex = assetIndex_;
-        request.requester = msg.sender;
+        request.requester = _msgSender();
         request.executed = false;
         request.voteCount = 0;
         payoutStartRequests.push(request);

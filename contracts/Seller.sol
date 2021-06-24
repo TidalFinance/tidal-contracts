@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./BaseRelayRecipient.sol";
+
 import "./NonReentrancy.sol";
 import "./WeekManaged.sol";
 
@@ -14,11 +16,13 @@ import "./interfaces/IBuyer.sol";
 import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
 
-// This contract is owned by Timelock.
-contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
+// This contract is not Ownable.
+contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
+
+    string public override versionRecipient = "1.0.0";
 
     IRegistry public registry;
 
@@ -89,10 +93,16 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     // who => assetIndex => payoutId
     mapping(address => mapping(uint16 => uint256)) userPayoutIdMap;
 
-    constructor () public { }
-
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) public {
         registry = registry_;
+    }
+
+    function _timeExtra() internal override view returns(uint256) {
+        return registry.timeExtra();
+    }
+
+    function _trustedForwarder() internal override view returns(address) {
+        return registry.trustedForwarder();
     }
 
     // Update and pay last week's premium.
@@ -160,11 +170,11 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     }
 
     function changeBasket(uint8 category_, uint16[] calldata basketIndexes_) external {
-        require(!isAssetLocked(msg.sender, category_), "Asset locked");
-        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
+        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
         require(!hasPendingPayout(basketIndexes_), "Has pending payout");
 
-        if (userBalance[msg.sender][category_].currentBalance == 0) {
+        if (userBalance[_msgSender()][category_].currentBalance == 0) {
             // Change now.
 
             for (uint256 i = 0;
@@ -173,10 +183,10 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
                 uint16 index = uint16(IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i));
                 bool has = hasIndex(basketIndexes_, index);
 
-                if (has && !userBasket[msg.sender][index]) {
-                    userBasket[msg.sender][index] = true;
-                } else if (!has && userBasket[msg.sender][index]) {
-                    userBasket[msg.sender][index] = false;
+                if (has && !userBasket[_msgSender()][index]) {
+                    userBasket[_msgSender()][index] = true;
+                } else if (!has && userBasket[_msgSender()][index]) {
+                    userBasket[_msgSender()][index] = false;
                 }
             }
         } else {
@@ -188,7 +198,7 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
             request.executed = false;
 
             // One request per week per category.
-            basketRequestMap[msg.sender][getUnlockWeek()][category_] = request;
+            basketRequestMap[_msgSender()][getUnlockWeek()][category_] = request;
         }
     }
 
@@ -211,12 +221,12 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
             uint16 index = uint16(IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i));
             bool has = hasIndex(request.assetIndexes, index);
 
-            if (has && !userBasket[msg.sender][index]) {
-                userBasket[msg.sender][index] = true;
+            if (has && !userBasket[who_][index]) {
+                userBasket[who_][index] = true;
                 assetBalance[index] = assetBalance[index].add(
                     currentBalance);
-            } else if (!has && userBasket[msg.sender][index]) {
-                userBasket[msg.sender][index] = false;
+            } else if (!has && userBasket[who_][index]) {
+                userBasket[who_][index] = false;
                 assetBalance[index] = assetBalance[index].sub(
                     currentBalance);
             }
@@ -284,38 +294,38 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     }
 
     function deposit(uint8 category_, uint256 amount_) external lock {
-        require(!isAssetLocked(msg.sender, category_), "Asset locked");
-        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
+        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
-        IERC20(registry.baseToken()).safeTransferFrom(msg.sender, address(this), amount_);
+        IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
 
-        userBalance[msg.sender][category_].futureBalance = userBalance[msg.sender][category_].futureBalance.add(amount_);
+        userBalance[_msgSender()][category_].futureBalance = userBalance[_msgSender()][category_].futureBalance.add(amount_);
     }
 
     function reduceDeposit(uint8 category_, uint256 amount_) external lock {
         // Even asset locked, user can still reduce.
 
-        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
-        require(amount_ <= userBalance[msg.sender][category_].futureBalance.sub(
-            userBalance[msg.sender][category_].currentBalance), "Not enough future balance");
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
+        require(amount_ <= userBalance[_msgSender()][category_].futureBalance.sub(
+            userBalance[_msgSender()][category_].currentBalance), "Not enough future balance");
 
-        IERC20(registry.baseToken()).safeTransfer(msg.sender, amount_);
+        IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
 
-        userBalance[msg.sender][category_].futureBalance = userBalance[msg.sender][category_].futureBalance.sub(amount_);
+        userBalance[_msgSender()][category_].futureBalance = userBalance[_msgSender()][category_].futureBalance.sub(amount_);
     }
 
     function withdraw(uint8 category_, uint256 amount_) external {
-        require(!isAssetLocked(msg.sender, category_), "Asset locked");
-        require(userInfo[msg.sender].week == getCurrentWeek(), "Not updated yet");
+        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         require(amount_ > 0, "Requires positive amount");
-        require(amount_ <= userBalance[msg.sender][category_].currentBalance, "Not enough user balance");
+        require(amount_ <= userBalance[_msgSender()][category_].currentBalance, "Not enough user balance");
 
         WithdrawRequest memory request;
         request.amount = amount_;
         request.time = getNow();
         request.executed = false;
-        withdrawRequestMap[msg.sender][getUnlockWeek()][category_] = request;
+        withdrawRequestMap[_msgSender()][getUnlockWeek()][category_] = request;
     }
 
     function withdrawReady(address who_, uint8 category_) external lock {
@@ -350,13 +360,13 @@ contract Seller is ISeller, Ownable, WeekManaged, NonReentrancy {
     }
 
     function claimPremium() external lock {
-        IERC20(registry.baseToken()).safeTransfer(msg.sender, userInfo[msg.sender].premium);
-        userInfo[msg.sender].premium = 0;
+        IERC20(registry.baseToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].premium);
+        userInfo[_msgSender()].premium = 0;
     }
 
     function claimBonus() external lock {
-        IERC20(registry.tidalToken()).safeTransfer(msg.sender, userInfo[msg.sender].bonus);
-        userInfo[msg.sender].bonus = 0;
+        IERC20(registry.tidalToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].bonus);
+        userInfo[_msgSender()].bonus = 0;
     }
 
     function startPayout(uint16 assetIndex_, uint256 payoutId_) external override {

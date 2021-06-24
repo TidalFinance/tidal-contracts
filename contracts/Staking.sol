@@ -7,6 +7,8 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
+import "./BaseRelayRecipient.sol";
+
 import "./NonReentrancy.sol";
 import "./WeekManaged.sol";
 
@@ -15,10 +17,12 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentrancy {
+contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
+
+    string public override versionRecipient = "1.0.0";
 
     // For improving precision.
     uint256 constant UNIT_PER_SHARE = 1e18;
@@ -82,10 +86,20 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     event WithdrawReady(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
 
-    constructor () GovernanceToken("Tidal Staking", "TIDAL-STAKING") public { }
-
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) GovernanceToken("Tidal Staking", "TIDAL-STAKING") public {
         registry = registry_;
+    }
+
+    function _timeExtra() internal override view returns(uint256) {
+        return registry.timeExtra();
+    }
+
+    function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {
+        return BaseRelayRecipient._msgSender();
+    }
+
+    function _trustedForwarder() internal override view returns(address) {
+        return registry.trustedForwarder();
     }
 
     function set(
@@ -165,10 +179,10 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     function deposit(uint256 amount_) external lock {
         require(!hasPendingPayout(), "Has pending payout");
 
-        UserInfo storage user = userInfo[msg.sender];
+        UserInfo storage user = userInfo[_msgSender()];
         updatePool();
 
-        uint256 userAmount = balanceOf(msg.sender);
+        uint256 userAmount = balanceOf(_msgSender());
         if (userAmount > 0) {
             uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
@@ -177,33 +191,33 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         }
 
         IERC20(registry.tidalToken()).transferFrom(
-            msg.sender,
+            _msgSender(),
             address(this),
             amount_
         );
 
-        GovernanceToken._mint(msg.sender, amount_);
+        GovernanceToken._mint(_msgSender(), amount_);
         user.rewardDebt = userAmount.add(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
-        emit Deposit(msg.sender, amount_);
+        emit Deposit(_msgSender(), amount_);
     }
 
     function withdraw(uint256 amount_) external {
         require(!hasPendingPayout(), "Has pending payout");
 
-        uint256 userAmount = balanceOf(msg.sender);
-        require(userAmount >= withdrawAmountMap[msg.sender].add(amount_), "Not enough amount");
+        uint256 userAmount = balanceOf(_msgSender());
+        require(userAmount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
 
-        withdrawRequestMap[msg.sender].push(WithdrawRequest({
+        withdrawRequestMap[_msgSender()].push(WithdrawRequest({
             time: getNow(),
             amount: amount_,
             executed: false
         }));
 
         // Updates total withdraw amount in pending.
-        withdrawAmountMap[msg.sender] = withdrawAmountMap[msg.sender].add(amount_);
+        withdrawAmountMap[_msgSender()] = withdrawAmountMap[_msgSender()].add(amount_);
 
-        emit Withdraw(msg.sender, amount_);
+        emit Withdraw(_msgSender(), amount_);
     }
 
     function withdrawReady(address who_, uint256 index_) external lock {
@@ -242,21 +256,21 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
 
     // claim all reward.
     function claim() external {
-        UserInfo storage user = userInfo[msg.sender];
+        UserInfo storage user = userInfo[_msgSender()];
 
         updatePool();
 
-        uint256 userAmount = balanceOf(msg.sender);
+        uint256 userAmount = balanceOf(_msgSender());
         uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
             UNIT_PER_SHARE).sub(user.rewardDebt);
         uint256 rewardTotal = user.rewardAmount.add(pending);
 
-        IERC20(registry.tidalToken()).transfer(msg.sender, rewardTotal);
+        IERC20(registry.tidalToken()).transfer(_msgSender(), rewardTotal);
 
         user.rewardAmount = 0;
         user.rewardDebt = userAmount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
-        emit Claim(msg.sender, rewardTotal);
+        emit Claim(_msgSender(), rewardTotal);
     }
 
     function isAssetLocked(address who_) public view returns(bool) {

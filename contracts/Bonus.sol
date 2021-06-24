@@ -27,10 +27,12 @@ contract Bonus is IBonus, Ownable, WeekManaged {
     // assetIndex => week
     mapping(uint16 => uint256) public guarantorWeek;
 
-    constructor () public { }
-
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) public {
         registry = registry_;
+    }
+
+    function _timeExtra() internal override view returns(uint256) {
+        return registry.timeExtra();
     }
 
     function setBonusPerAssetOfG(uint16 assetIndex_, uint256 value_) external onlyOwner {

@@ -19,6 +19,9 @@ contract Registry is Ownable, IRegistry {
     // For improving precision of bonusPerShare.
     uint256 public override constant UNIT_PER_SHARE = 1e18;
 
+    // For debug purpose.
+    uint256 public override timeExtra = 0;
+
     address public override buyer;
     address public override seller;
     address public override guarantor;
@@ -36,6 +39,13 @@ contract Registry is Ownable, IRegistry {
 
     address public override governor;
     address public override committee;
+
+    address public override trustedForwarder;
+
+    // This function will be removed in production.
+    function setTimeExtra(uint256 timeExtra_) external onlyOwner {
+        timeExtra = timeExtra_;
+    }
 
     function setBuyer(address buyer_) external onlyOwner {
         require(buyer == address(0), "Can set only once");
@@ -107,5 +117,10 @@ contract Registry is Ownable, IRegistry {
     // Upgradable.
     function setCommittee(address committee_) external onlyOwner {
         committee = committee_;
+    }
+
+    // Upgradable.
+    function setTrustedForwarder(address trustedForwarder_) external {
+        trustedForwarder = trustedForwarder_;
     }
 }

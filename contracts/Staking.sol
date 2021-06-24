@@ -11,12 +11,11 @@ import "./common/BaseRelayRecipient.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
-import "./tokens/GovernanceToken.sol";
 import "./interfaces/IRegistry.sol";
 import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -28,6 +27,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
 
     // Info of each user.
     struct UserInfo {
+        uint256 amount;
         uint256 rewardAmount;
         uint256 rewardDebt; // Reward debt.
     }
@@ -37,6 +37,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
 
     // Info of the pool.
     struct PoolInfo {
+        uint256 amount;
         uint256 rewardPerBlock;
         uint256 startBlock;
         uint256 endBlock;
@@ -85,7 +86,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     event WithdrawReady(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
 
-    constructor (IRegistry registry_) GovernanceToken("Tidal Staking", "TIDAL-STAKING") public {
+    constructor (IRegistry registry_) public {
         registry = registry_;
     }
 
@@ -138,7 +139,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         returns (uint256)
     {
         UserInfo storage user = userInfo[who_];
-        uint256 tokenTotal = totalSupply();
+        uint256 tokenTotal = poolInfo.amount;
 
         uint256 accRewardPerShare = 0;
 
@@ -149,8 +150,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
             );
         }
 
-        uint256 userAmount = balanceOf(who_);
-        return userAmount.mul(accRewardPerShare).div(
+        return user.amount.mul(accRewardPerShare).div(
             UNIT_PER_SHARE).sub(user.rewardDebt).add(user.rewardAmount);
     }
 
@@ -160,7 +160,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
             return;
         }
 
-        uint256 tokenTotal = totalSupply();
+        uint256 tokenTotal = poolInfo.amount;
         if (tokenTotal == 0) {
             poolInfo.lastRewardBlock = block.number;
             return;
@@ -181,9 +181,8 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         UserInfo storage user = userInfo[_msgSender()];
         updatePool();
 
-        uint256 userAmount = balanceOf(_msgSender());
-        if (userAmount > 0) {
-            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+        if (user.amount > 0) {
+            uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
 
             user.rewardAmount = user.rewardAmount.add(pending);
@@ -195,8 +194,10 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
             amount_
         );
 
-        GovernanceToken._mint(_msgSender(), amount_);
-        user.rewardDebt = userAmount.add(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.amount = user.amount.add(amount_);
+        poolInfo.amount = poolInfo.amount.add(amount_);
+
+        user.rewardDebt = user.amount.add(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         emit Deposit(_msgSender(), amount_);
     }
@@ -204,8 +205,8 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
     function withdraw(uint256 amount_) external {
         require(!hasPendingPayout(), "Has pending payout");
 
-        uint256 userAmount = balanceOf(_msgSender());
-        require(userAmount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
+        UserInfo storage user = userInfo[_msgSender()];
+        require(user.amount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
 
         withdrawRequestMap[_msgSender()].push(WithdrawRequest({
             time: getNow(),
@@ -228,19 +229,20 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
 
         UserInfo storage user = userInfo[who_];
 
-        uint256 userAmount = balanceOf(who_);
-        require(userAmount >= request.amount, "Not enough amount");
+        require(user.amount >= request.amount, "Not enough amount");
 
         updatePool();
 
-        if (userAmount > 0) {
-            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+        if (user.amount > 0) {
+            uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        GovernanceToken._burn(who_, request.amount);
-        user.rewardDebt = userAmount.sub(request.amount).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.amount = user.amount.sub(request.amount);
+        poolInfo.amount = poolInfo.amount.sub(request.amount);
+
+        user.rewardDebt = user.amount.sub(request.amount).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         IERC20(registry.tidalToken()).transfer(address(who_), request.amount);
 
@@ -259,15 +261,14 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
 
         updatePool();
 
-        uint256 userAmount = balanceOf(_msgSender());
-        uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+        uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
             UNIT_PER_SHARE).sub(user.rewardDebt);
         uint256 rewardTotal = user.rewardAmount.add(pending);
 
         IERC20(registry.tidalToken()).transfer(_msgSender(), rewardTotal);
 
         user.rewardAmount = 0;
-        user.rewardDebt = userAmount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         emit Claim(_msgSender(), rewardTotal);
     }
@@ -293,7 +294,7 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         require(payoutId_ == payoutId, "payoutId should be started");
         require(payoutInfo[payoutId_].total == 0, "already set");
 
-        uint256 tokenTotal = totalSupply();
+        uint256 tokenTotal = poolInfo.amount;
 
         require(total_ <= tokenTotal, "More than token total");
 
@@ -308,9 +309,8 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         UserInfo storage user = userInfo[who_];
         updatePool();
 
-        uint256 userAmount = balanceOf(who_);
-        if (userAmount > 0) {
-            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+        if (user.amount > 0) {
+            uint256 pending = user.amount.mul(poolInfo.accRewardPerShare).div(
                 UNIT_PER_SHARE).sub(user.rewardDebt);
             user.rewardAmount = user.rewardAmount.add(pending);
         }
@@ -322,14 +322,15 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
                 continue;
             }
 
-            uint256 amountToPay = userAmount.mul(payoutInfo[payoutId_].unitPerShare).div(UNIT_PER_SHARE);
-            GovernanceToken._burn(who_, amountToPay);
+            uint256 amountToPay = user.amount.mul(payoutInfo[payoutId_].unitPerShare).div(UNIT_PER_SHARE);
+
+            user.amount = user.amount.sub(amountToPay);
+            poolInfo.amount = poolInfo.amount.sub(amountToPay);
 
             payoutInfo[payoutId_].paid = payoutInfo[payoutId_].paid.add(amountToPay);
         }
 
-        userAmount = balanceOf(who_);
-        user.rewardDebt = userAmount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
     }
 
     function finishPayout(uint256 payoutId_) external {
@@ -344,33 +345,6 @@ contract Staking is IStaking, Ownable, GovernanceToken, WeekManaged, NonReentran
         IERC20(registry.tidalToken()).transfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
 
         payoutInfo[payoutId_].finished = true;
-    }
-
-    function _transfer(address sender_, address recipient_, uint256 amount_) internal virtual override {
-        require(!hasPendingPayout(), "Has pending payout");
-
-        UserInfo storage fromUser = userInfo[sender_];
-        UserInfo storage toUser = userInfo[recipient_];
-        updatePool();
-
-        uint256 fromUserAmount = balanceOf(sender_);
-        if (fromUserAmount > 0) {
-            uint256 fromUserPending = fromUserAmount.mul(poolInfo.accRewardPerShare).div(
-                UNIT_PER_SHARE).sub(fromUser.rewardDebt);
-            fromUser.rewardAmount = fromUser.rewardAmount.add(fromUserPending);
-        }
-
-        uint256 toUserAmount = balanceOf(recipient_);
-        if (toUserAmount > 0) {
-            uint256 toUserPending = toUserAmount.mul(poolInfo.accRewardPerShare).div(
-                UNIT_PER_SHARE).sub(toUser.rewardDebt);
-            toUser.rewardAmount = toUser.rewardAmount.add(toUserPending);
-        }
-
-        super._transfer(sender_, recipient_, amount_);
-
-        fromUser.rewardDebt = fromUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
-        toUser.rewardDebt = toUserAmount.sub(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
     }
 
     function getWithdrawRequestBackwards(address who_, uint256 offset_, uint256 limit_) external view returns(WithdrawRequest[] memory) {

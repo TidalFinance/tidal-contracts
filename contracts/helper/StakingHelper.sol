@@ -13,8 +13,8 @@ contract StakingHelper {
     }
     
     function getStakingAPR() external view returns (uint apr) {
-        (uint256 rewardPerBlock,,,,) = staking.poolInfo();
-        uint256 totalSupply = staking.totalSupply();
+        (uint256 totalSupply, uint256 rewardPerBlock,,,,) = staking.poolInfo();
+
         uint256 blockNumber;
         uint256 id;
         assembly {

@@ -58,7 +58,7 @@ contract GovernanceToken is ERC20 {
     event DelegateVotesChanged(address indexed delegate, uint previousBalance, uint newBalance);
 
     /**
-     * @notice Delegate votes from `msg.sender` to `delegatee`
+     * @notice Delegate votes from `_msgSender()` to `delegatee`
      * @param delegator The address to get delegatee for
      */
     function delegates(address delegator)
@@ -70,11 +70,11 @@ contract GovernanceToken is ERC20 {
     }
 
    /**
-    * @notice Delegate votes from `msg.sender` to `delegatee`
+    * @notice Delegate votes from `_msgSender()` to `delegatee`
     * @param delegatee The address to delegate votes to
     */
     function delegate(address delegatee) external {
-        return _delegate(msg.sender, delegatee);
+        return _delegate(_msgSender(), delegatee);
     }
 
     /**

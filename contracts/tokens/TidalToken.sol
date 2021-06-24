@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "./GovernanceToken.sol";
 
 import "../common/BaseRelayRecipient.sol";
 
 import "../interfaces/IRegistry.sol";
 
 // This token is owned by Timelock.
-contract TidalToken is ERC20("Tidal Token", "TIL"), BaseRelayRecipient {
+contract TidalToken is GovernanceToken("Tidal Token", "TIL"), BaseRelayRecipient {
 
     string public override versionRecipient = "1.0.0";
 

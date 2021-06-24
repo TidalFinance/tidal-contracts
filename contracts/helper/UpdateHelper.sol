@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-
 import "../interfaces/IRegistry.sol";
 import "../interfaces/ISeller.sol";
 import "../interfaces/IGuarantor.sol";
 
-contract UpdateHelper is Ownable {
+contract UpdateHelper {
     
     IRegistry public registry;
     
-    constructor () public {
-    }
-    
-    function setRegistry(IRegistry registry_) external onlyOwner {
+    constructor (IRegistry registry_) public {
         registry = registry_;
     }
     

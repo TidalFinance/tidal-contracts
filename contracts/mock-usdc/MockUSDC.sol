@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "./ContextMixin.sol";
 import "./NativeMetaTransaction.sol";
 
-contract UChildERC20 is
+contract MockUSDC is
     ERC20,
     NativeMetaTransaction,
     ContextMixin

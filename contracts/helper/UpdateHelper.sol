@@ -5,12 +5,20 @@ import "../interfaces/IRegistry.sol";
 import "../interfaces/ISeller.sol";
 import "../interfaces/IGuarantor.sol";
 
-contract UpdateHelper {
-    
+import "../common/BaseRelayRecipient.sol";
+
+contract UpdateHelper is BaseRelayRecipient {
+
+    string public override versionRecipient = "1.0.0";
+
     IRegistry public registry;
     
     constructor (IRegistry registry_) public {
         registry = registry_;
+    }
+
+    function _trustedForwarder() internal override view returns(address) {
+        return registry.trustedForwarder();
     }
     
     function update(address who_) external {

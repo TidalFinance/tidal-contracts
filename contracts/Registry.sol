@@ -120,7 +120,7 @@ contract Registry is Ownable, IRegistry {
     }
 
     // Upgradable.
-    function setTrustedForwarder(address trustedForwarder_) external {
+    function setTrustedForwarder(address trustedForwarder_) external onlyOwner {
         trustedForwarder = trustedForwarder_;
     }
 }

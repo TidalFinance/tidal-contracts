@@ -1,5 +1,5 @@
 // SPDX-License-Identifier:MIT
-pragma solidity ^0.6.12;
+pragma solidity 0.6.12;
 
 /**
  * a contract must implement this interface in order to support relayed transaction.

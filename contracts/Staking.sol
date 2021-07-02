@@ -195,7 +195,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         user.amount = user.amount.add(amount_);
         poolInfo.amount = poolInfo.amount.add(amount_);
 
-        user.rewardDebt = user.amount.add(amount_).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         emit Deposit(_msgSender(), amount_);
     }
@@ -240,7 +240,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         user.amount = user.amount.sub(request.amount);
         poolInfo.amount = poolInfo.amount.sub(request.amount);
 
-        user.rewardDebt = user.amount.sub(request.amount).mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+        user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
         IERC20(registry.tidalToken()).transfer(address(who_), request.amount);
 

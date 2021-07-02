@@ -89,7 +89,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     mapping(uint16 => uint256) public payoutIdMap;
 
     // who => assetIndex => payoutId
-    mapping(address => mapping(uint16 => uint256)) userPayoutIdMap;
+    mapping(address => mapping(uint16 => uint256)) public userPayoutIdMap;
 
     constructor (IRegistry registry_) public {
         registry = registry_;

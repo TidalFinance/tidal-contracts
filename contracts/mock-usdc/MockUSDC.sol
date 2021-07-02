@@ -16,7 +16,7 @@ contract MockUSDC is
     constructor() public ERC20("MockUSDC", "USDC") {}
 
     function decimals() public view override returns (uint8) {
-        return 18;
+        return 6;
     }
 
     /**

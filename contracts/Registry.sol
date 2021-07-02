@@ -37,6 +37,8 @@ contract Registry is Ownable, IRegistry {
     uint256 public override guarantorPercentage = 5;  // 5%
     uint256 public override platformPercentage = 5;  // 5%
 
+    uint256 public override stakingWithdrawWaitTime = 14 days;
+
     address public override governor;
     address public override committee;
 
@@ -107,6 +109,11 @@ contract Registry is Ownable, IRegistry {
     function setPlatformPercentage(uint256 percentage_) external onlyOwner {
         require(percentage_ < PERCENTAGE_BASE, "Invalid input");
         platformPercentage = percentage_;
+    }
+
+    // Upgradable.
+    function setStakingWithdrawWaitTime(uint256 stakingWithdrawWaitTime_) external onlyOwner {
+        stakingWithdrawWaitTime = stakingWithdrawWaitTime_;
     }
 
     // Upgradable.

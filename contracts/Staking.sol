@@ -61,8 +61,6 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     // who => amount
     mapping(address => uint256) public withdrawAmountMap;
 
-    uint256 public withdrawWaitTime = 14 days;
-
     IRegistry public registry;
 
     struct PayoutInfo {
@@ -224,7 +222,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         WithdrawRequest storage request = withdrawRequestMap[who_][index_];
 
         require(request.time > 0, "Non-existing request");
-        require(getNow() > request.time.add(withdrawWaitTime), "Not ready yet");
+        require(getNow() > request.time.add(registry.stakingWithdrawWaitTime()), "Not ready yet");
         require(!request.executed, "already executed");
 
         UserInfo storage user = userInfo[who_];

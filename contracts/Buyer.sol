@@ -103,7 +103,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         return userInfoMap[who_].weekEnd == getCurrentWeek();
     }
 
-    function getBalance(address who_) public view returns(uint256) {
+    function getBalance(address who_) external view returns(uint256) {
         return userInfoMap[who_].balance;
     }
 

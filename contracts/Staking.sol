@@ -271,7 +271,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         emit Claim(_msgSender(), rewardTotal);
     }
 
-    function isAssetLocked(address who_) public view returns(bool) {
+    function isAssetLocked(address who_) external view returns(bool) {
         return payoutId > 0 && !payoutInfo[payoutId].finished && userPayoutIdMap[who_] < payoutId;
     }
 

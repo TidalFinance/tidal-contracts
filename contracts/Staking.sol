@@ -254,7 +254,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
 
 
     // claim all reward.
-    function claim() external {
+    function claim() external lock {
         UserInfo storage user = userInfo[_msgSender()];
 
         updatePool();

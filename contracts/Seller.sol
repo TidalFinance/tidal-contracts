@@ -137,7 +137,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         poolInfo[assetIndex_].weekOfBonus = week;
     }
 
-    function isAssetLocked(address who_, uint8 category_) public view returns(bool) {
+    function isCategoryLocked(address who_, uint8 category_) public view returns(bool) {
         for (uint256 i = 0; i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category_); ++i) {
             uint16 index = IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i);
             uint256 payoutId = payoutIdMap[index];
@@ -149,11 +149,25 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         return false;
     }
 
+    function isAssetLocked(uint16 assetIndex_) external override view returns(bool) {
+        uint256 payoutId = payoutIdMap[assetIndex_];
+        return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
+    }
+
     function hasPendingPayout(uint16[] memory basketIndexes_) public view returns(bool) {
         for (uint256 i = 0; i < basketIndexes_.length; ++i) {
             uint16 assetIndex = basketIndexes_[i];
             uint256 payoutId = payoutIdMap[assetIndex];
             if (payoutId > 0 && !payoutInfo[assetIndex][payoutId].finished) return true;
+        }
+
+        return false;
+    }
+
+    function hasDeprecatedAsset(uint16[] memory basketIndexes_) public view returns(bool) {
+        for (uint256 i = 0; i < basketIndexes_.length; ++i) {
+            uint16 assetIndex = basketIndexes_[i];
+            if (IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex)) return true;
         }
 
         return false;
@@ -168,9 +182,10 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     }
 
     function changeBasket(uint8 category_, uint16[] calldata basketIndexes_) external {
-        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
         require(!hasPendingPayout(basketIndexes_), "Has pending payout");
+        require(!hasDeprecatedAsset(basketIndexes_), "Has deprecated asset");
 
         if (userBalance[_msgSender()][category_].currentBalance == 0) {
             // Change now.
@@ -203,7 +218,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     function changeBasketReady(address who_, uint8 category_) external {
         BasketRequest storage request = basketRequestMap[who_][getCurrentWeek()][category_];
 
-        require(!isAssetLocked(who_, category_), "Asset locked");
+        require(!isCategoryLocked(who_, category_), "Asset locked");
         require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
         require(request.time > 0, "No request");
@@ -245,6 +260,10 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         for (index = 0;
                 index < IAssetManager(registry.assetManager()).getAssetLength();
                 ++index) {
+            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
+              continue;
+            }
+
             require(poolInfo[index].weekOfPremium == week &&
                 poolInfo[index].weekOfBonus == week, "Not ready");
         }
@@ -255,6 +274,10 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         for (index = 0;
                 index < IAssetManager(registry.assetManager()).getAssetLength();
                 ++index) {
+            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
+              continue;
+            }
+
             category = IAssetManager(registry.assetManager()).getAssetCategory(index);
             uint256 currentBalance = userBalance[who_][category].currentBalance;
             uint256 futureBalance = userBalance[who_][category].futureBalance;
@@ -268,7 +291,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
                 poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
 
             // Update asset balance if no claims.
-            if (!isAssetLocked(who_, category) && userBasket[who_][index]) {
+            if (!isCategoryLocked(who_, category) && userBasket[who_][index]) {
                 assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
             }
         }
@@ -277,7 +300,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         for (category = 0;
                 category < IAssetManager(registry.assetManager()).getCategoryLength();
                 ++category) {
-            if (!isAssetLocked(who_, category)) {
+            if (!isCategoryLocked(who_, category)) {
                 uint256 currentBalance = userBalance[who_][category].currentBalance;
                 uint256 futureBalance = userBalance[who_][category].futureBalance;
 
@@ -292,7 +315,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     }
 
     function deposit(uint8 category_, uint256 amount_) external lock {
-        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(!registry.depositPaused(), "Deposit paused");
+        require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
@@ -313,7 +337,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     }
 
     function withdraw(uint8 category_, uint256 amount_) external {
-        require(!isAssetLocked(_msgSender(), category_), "Asset locked");
+        require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         require(amount_ > 0, "Requires positive amount");
@@ -329,7 +353,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     function withdrawReady(address who_, uint8 category_) external lock {
         WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()][category_];
 
-        require(!isAssetLocked(who_, category_), "Asset locked");
+        require(!isCategoryLocked(who_, category_), "Asset locked");
         require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
         require(request.time > 0, "No request");

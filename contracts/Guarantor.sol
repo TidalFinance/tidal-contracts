@@ -134,12 +134,20 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         uint16 index;
         // Assert if premium or bonus not updated, or user already updated.
         for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
+            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
+              continue;
+            }
+
             require(poolInfo[index].weekOfPremium == week &&
                 poolInfo[index].weekOfBonus == week, "Not ready");
         }
 
         // For every asset
         for (index = 0; index < IAssetManager(registry.assetManager()).getAssetLength(); ++index) {
+            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
+              continue;
+            }
+
             uint256 currentBalance = userBalance[who_][index].currentBalance;
             uint256 futureBalance = userBalance[who_][index].futureBalance;
 
@@ -173,6 +181,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
+        require(!registry.depositPaused(), "Deposit paused");
+        require(!IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex_), "Asset deprecated");
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 

@@ -147,6 +147,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
             for (uint16 index = 0;
                     index < IAssetManager(registry.assetManager()).getAssetLength();
                     ++index) {
+                if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
+                  continue;
+                }
+
                 _refundAndUtilize(index);
 
                 uint256 premiumOfAsset = currentSubscription[index].mul(
@@ -188,28 +192,35 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         // Maybe refund to user.
         userInfoMap[who_].balance = userInfoMap[who_].balance.add(premiumToRefund[buyerAssetIndex]);
 
-        // Get per user premium
-        uint256 premium = futureSubscription[buyerAssetIndex].mul(
+        if (ISeller(registry.seller()).isAssetLocked(buyerAssetIndex) ||
+                IAssetManager(registry.assetManager()).getAssetDeprecated(buyerAssetIndex)) {
+            // Stops user's current and future subscription.
+            currentSubscription[buyerAssetIndex] = 0;
+            futureSubscription[buyerAssetIndex] = 0;
+        } else {
+            // Get per user premium
+            uint256 premium = futureSubscription[buyerAssetIndex].mul(
                 getPremiumRate(buyerAssetIndex)).div(registry.PREMIUM_BASE());
 
-        if (userInfoMap[who_].balance >= premium) {
-            userInfoMap[who_].balance = userInfoMap[who_].balance.sub(premium);
+            if (userInfoMap[who_].balance >= premium) {
+                userInfoMap[who_].balance = userInfoMap[who_].balance.sub(premium);
 
-            if (userInfoMap[who_].weekBegin == 0 ||
-                    userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
-                userInfoMap[who_].weekBegin = currentWeek;
-            }
+                if (userInfoMap[who_].weekBegin == 0 ||
+                        userInfoMap[who_].weekEnd < userInfoMap[who_].weekUpdated) {
+                    userInfoMap[who_].weekBegin = currentWeek;
+                }
 
-            userInfoMap[who_].weekEnd = currentWeek;
+                userInfoMap[who_].weekEnd = currentWeek;
 
-            if (futureSubscription[buyerAssetIndex] > 0) {
-                currentSubscription[buyerAssetIndex] = futureSubscription[buyerAssetIndex];
-            } else if (currentSubscription[buyerAssetIndex] > 0) {
+                if (futureSubscription[buyerAssetIndex] > 0) {
+                    currentSubscription[buyerAssetIndex] = futureSubscription[buyerAssetIndex];
+                } else if (currentSubscription[buyerAssetIndex] > 0) {
+                    currentSubscription[buyerAssetIndex] = 0;
+                }
+            } else {
+                // Stops user's current subscription.
                 currentSubscription[buyerAssetIndex] = 0;
             }
-        } else {
-            // Stops user's subscription.
-            currentSubscription[buyerAssetIndex] = 0;
         }
 
         userInfoMap[who_].weekUpdated = currentWeek;  // This week.
@@ -231,6 +242,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
+        require(!IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex_), "Asset deprecated");
         require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);

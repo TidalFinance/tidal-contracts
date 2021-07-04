@@ -25,6 +25,8 @@ interface IRegistry {
     function guarantorPercentage() external view returns(uint256);
     function platformPercentage() external view returns(uint256);
 
+    function depositPaused() external view returns(bool);
+
     function stakingWithdrawWaitTime() external view returns(uint256);
 
     function governor() external view returns(address);

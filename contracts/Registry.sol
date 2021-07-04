@@ -39,6 +39,8 @@ contract Registry is Ownable, IRegistry {
 
     uint256 public override stakingWithdrawWaitTime = 14 days;
 
+    bool public override depositPaused = false;
+
     address public override governor;
     address public override committee;
 
@@ -114,6 +116,11 @@ contract Registry is Ownable, IRegistry {
     // Upgradable.
     function setStakingWithdrawWaitTime(uint256 stakingWithdrawWaitTime_) external onlyOwner {
         stakingWithdrawWaitTime = stakingWithdrawWaitTime_;
+    }
+
+    // Upgradable.
+    function setDepositPaused(bool paused_) external onlyOwner {
+        depositPaused = paused_;
     }
 
     // Upgradable.

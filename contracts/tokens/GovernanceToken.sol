@@ -49,7 +49,7 @@ contract GovernanceToken is ERC20 {
     bytes32 public constant DELEGATION_TYPEHASH = keccak256("Delegation(address delegatee,uint256 nonce,uint256 expiry)");
 
     /// @notice A record of states for signing / validating signatures
-    mapping (address => uint) public nonces;
+    mapping (address => uint) public governanceNonces;
 
       /// @notice An event thats emitted when an account changes its delegate
     event DelegateChanged(address indexed delegator, address indexed fromDelegate, address indexed toDelegate);
@@ -100,7 +100,7 @@ contract GovernanceToken is ERC20 {
             abi.encode(
                 DOMAIN_TYPEHASH,
                 keccak256(bytes(name())),
-                getChainId(),
+                _getChainId(),
                 address(this)
             )
         );
@@ -124,7 +124,7 @@ contract GovernanceToken is ERC20 {
 
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "GovernanceToken::delegateBySig: invalid signature");
-        require(nonce == nonces[signatory]++, "GovernanceToken::delegateBySig: invalid nonce");
+        require(nonce == governanceNonces[signatory]++, "GovernanceToken::delegateBySig: invalid nonce");
         require(now <= expiry, "GovernanceToken::delegateBySig: signature expired");
         return _delegate(signatory, delegatee);
     }
@@ -245,7 +245,7 @@ contract GovernanceToken is ERC20 {
         return uint32(n);
     }
 
-    function getChainId() internal pure returns (uint) {
+    function _getChainId() internal pure returns (uint) {
         uint256 chainId;
         assembly { chainId := chainid() }
         return chainId;

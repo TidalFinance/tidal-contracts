@@ -3,8 +3,8 @@ pragma solidity 0.6.12;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-import "./ContextMixin.sol";
-import "./NativeMetaTransaction.sol";
+import "./matic/ContextMixin.sol";
+import "./matic/NativeMetaTransaction.sol";
 
 contract MockUSDC is
     ERC20,

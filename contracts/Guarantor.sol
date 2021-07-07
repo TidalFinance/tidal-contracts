@@ -181,7 +181,6 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
-        require(!registry.depositPaused(), "Deposit paused");
         require(!IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex_), "Asset deprecated");
         require(!hasPendingPayout(assetIndex_), "Has pending payout");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");

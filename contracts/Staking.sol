@@ -17,7 +17,6 @@ import "./interfaces/IStaking.sol";
 // This contract is owned by Timelock.
 contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
-    using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
     string public override versionRecipient = "1.0.0";
@@ -290,7 +289,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         require(msg.sender == registry.committee(), "Only commitee can call");
 
         require(payoutId_ == payoutId, "payoutId should be started");
-        require(payoutInfo[payoutId_].total == 0, "already set");
+        require(payoutInfo[payoutId_].toAddress == address(0), "already set");
 
         uint256 tokenTotal = poolInfo.amount;
 
@@ -304,6 +303,9 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     }
 
     function doPayout(address who_) external {
+        require(payoutInfo[payoutId].toAddress != address(0), "not set");
+        require(userPayoutIdMap[who_] < payoutId, "Already paid");
+
         UserInfo storage user = userInfo[who_];
         updatePool();
 
@@ -313,20 +315,19 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        for (uint256 payoutId_ = userPayoutIdMap[who_] + 1; payoutId_ <= payoutId; ++payoutId_) {
-            userPayoutIdMap[who_] = payoutId_;
+        userPayoutIdMap[who_] = payoutId;
 
-            if (payoutInfo[payoutId_].finished) {
-                continue;
-            }
-
-            uint256 amountToPay = user.amount.mul(payoutInfo[payoutId_].unitPerShare).div(UNIT_PER_SHARE);
-
-            user.amount = user.amount.sub(amountToPay);
-            poolInfo.amount = poolInfo.amount.sub(amountToPay);
-
-            payoutInfo[payoutId_].paid = payoutInfo[payoutId_].paid.add(amountToPay);
+        if (payoutInfo[payoutId].finished) {
+          // In case someone paid for the difference.
+          return;
         }
+
+        uint256 amountToPay = user.amount.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
+
+        user.amount = user.amount.sub(amountToPay);
+        poolInfo.amount = poolInfo.amount.sub(amountToPay);
+
+        payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
 
         user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
     }

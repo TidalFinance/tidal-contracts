@@ -91,6 +91,20 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     // who => assetIndex => payoutId
     mapping(address => mapping(uint16 => uint256)) public userPayoutIdMap;
 
+    event Update(address indexed who_);
+    event Deposit(address indexed who_, uint8 indexed category_, uint256 amount_);
+    event ReduceDeposit(address indexed who_, uint8 indexed category_, uint256 amount_);
+    event Withdraw(address indexed who_, uint8 indexed category_, uint256 amount_);
+    event WithdrawReady(address indexed who_, uint8 indexed category_, uint256 amount_);
+    event ChangeBasket(address indexed who_, uint8 indexed category_);
+    event ChangeBasketReady(address indexed who_, uint8 indexed category_);
+    event ClaimPremium(address indexed who_, uint256 amount_);
+    event ClaimBonus(address indexed who_, uint256 amount_);
+    event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
+    event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
+    event DoPayout(address indexed who_, uint16 indexed assetIndex_, uint256 indexed payoutId_, uint256 amount_);
+    event FinishPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
+
     constructor (IRegistry registry_) public {
         registry = registry_;
     }
@@ -213,6 +227,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
             // One request per week per category.
             basketRequestMap[_msgSender()][getUnlockWeek()][category_] = request;
         }
+
+        emit ChangeBasket(_msgSender(), category_);
     }
 
     function changeBasketReady(address who_, uint8 category_) external {
@@ -246,6 +262,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         }
 
         request.executed = true;
+
+        emit ChangeBasketReady(_msgSender(), category_);
     }
 
     // Called for every user every week.
@@ -312,6 +330,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
         // Update week.
         userInfo[who_].week = week;
+
+        emit Update(who_);
     }
 
     function deposit(uint8 category_, uint256 amount_) external lock {
@@ -322,6 +342,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
 
         userBalance[_msgSender()][category_].futureBalance = userBalance[_msgSender()][category_].futureBalance.add(amount_);
+
+        emit Deposit(_msgSender(), category_, amount_);
     }
 
     function reduceDeposit(uint8 category_, uint256 amount_) external lock {
@@ -334,6 +356,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
 
         userBalance[_msgSender()][category_].futureBalance = userBalance[_msgSender()][category_].futureBalance.sub(amount_);
+
+        emit ReduceDeposit(_msgSender(), category_, amount_);
     }
 
     function withdraw(uint8 category_, uint256 amount_) external {
@@ -348,6 +372,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         request.time = getNow();
         request.executed = false;
         withdrawRequestMap[_msgSender()][getUnlockWeek()][category_] = request;
+
+        emit Withdraw(_msgSender(), category_, amount_);
     }
 
     function withdrawReady(address who_, uint8 category_) external lock {
@@ -379,15 +405,21 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         categoryBalance[category_] = categoryBalance[category_].sub(request.amount);
  
         request.executed = true;
+
+        emit WithdrawReady(_msgSender(), category_, request.amount);
     }
 
     function claimPremium() external lock {
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].premium);
+        emit ClaimPremium(_msgSender(), userInfo[_msgSender()].premium);
+
         userInfo[_msgSender()].premium = 0;
     }
 
     function claimBonus() external lock {
         IERC20(registry.tidalToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].bonus);
+        emit ClaimBonus(_msgSender(), userInfo[_msgSender()].bonus);
+
         userInfo[_msgSender()].bonus = 0;
     }
 
@@ -396,6 +428,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
         require(payoutId_ == payoutIdMap[assetIndex_] + 1, "payoutId should be increasing");
         payoutIdMap[assetIndex_] = payoutId_;
+
+        emit StartPayout(assetIndex_, payoutId_);
     }
 
     function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external override {
@@ -412,6 +446,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         payoutInfo[assetIndex_][payoutId_].unitPerShare = total_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
         payoutInfo[assetIndex_][payoutId_].paid = 0;
         payoutInfo[assetIndex_][payoutId_].finished = false;
+
+        emit SetPayout(assetIndex_, payoutId_, toAddress_, total_);
     }
 
     // This function can be called by anyone.
@@ -449,6 +485,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         }
 
         payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
+
+        emit DoPayout(who_, assetIndex_, payoutId, amountToPay);
     }
 
     // This function can be called by anyone as long as he will pay for the difference.
@@ -469,6 +507,8 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
                                                   payoutInfo[assetIndex_][payoutId_].total);
 
         payoutInfo[assetIndex_][payoutId_].finished = true;
+
+        emit FinishPayout(assetIndex_, payoutId_);
     }
 
     function getPendingBasket(address who_, uint8 category_, uint256 week_) external view returns(uint16[] memory) {

@@ -82,6 +82,10 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     event Withdraw(address indexed user, uint256 amount);
     event WithdrawReady(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
+    event StartPayout(uint256 indexed payoutId_);
+    event SetPayout(uint256 indexed payoutId_, address toAddress_, uint256 total_);
+    event DoPayout(address indexed who_, uint256 indexed payoutId_, uint256 amount_);
+    event FinishPayout(uint256 indexed payoutId_);
 
     constructor (IRegistry registry_) public {
         registry = registry_;
@@ -283,6 +287,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
 
         require(payoutId_ == payoutId + 1, "payoutId should be increasing");
         payoutId = payoutId_;
+
+        emit StartPayout(payoutId_);
     }
 
     function setPayout(uint256 payoutId_, address toAddress_, uint256 total_) external override {
@@ -300,6 +306,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         payoutInfo[payoutId_].unitPerShare = total_.mul(UNIT_PER_SHARE).div(tokenTotal);
         payoutInfo[payoutId_].paid = 0;
         payoutInfo[payoutId_].finished = false;
+
+        emit SetPayout(payoutId_, toAddress_, total_);
     }
 
     function doPayout(address who_) external {
@@ -330,6 +338,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
 
         user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
+
+        emit DoPayout(who_, payoutId, amountToPay);
     }
 
     function finishPayout(uint256 payoutId_) external {
@@ -344,6 +354,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         IERC20(registry.tidalToken()).transfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
 
         payoutInfo[payoutId_].finished = true;
+
+        emit FinishPayout(payoutId_);
     }
 
     function getWithdrawRequestBackwards(address who_, uint256 offset_, uint256 limit_) external view returns(WithdrawRequest[] memory) {

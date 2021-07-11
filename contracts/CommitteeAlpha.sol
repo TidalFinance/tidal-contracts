@@ -56,6 +56,18 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
 
     uint256 public commiteeVoteThreshod = 4;
 
+    event RequestPayoutStart(address indexed who_, uint16 indexed assetIndex_);
+    event ConfirmPayoutStartRequest(address indexed who_, uint256 indexed requestIndex_, uint256 indexed payoutId_);
+    event RequestPayoutAmount(
+        uint16 indexed assetIndex_,
+        uint256 indexed payoutId_,
+        address toAddress_,
+        uint256 sellerAmount_,
+        uint256 guarantorAmount_,
+        uint256 stakingAmount_
+    );
+    event ConfirmPayoutAmountRequest(address indexed who_, uint16 indexed assetIndex_, uint256 indexed payoutId_);
+
     constructor (IRegistry registry_) public {
         registry = registry_;
     }
@@ -119,6 +131,8 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
         request.executed = false;
         request.voteCount = 0;
         payoutStartRequests.push(request);
+
+        emit RequestPayoutStart(_msgSender(), assetIndex_);
     }
 
     // Step 1 (vote & execute), called by commitee members directly.
@@ -141,6 +155,8 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
             IStaking(registry.staking()).startPayout(payoutId_);
             request.executed = true;
         }
+
+        emit ConfirmPayoutStartRequest(msg.sender, requestIndex_, payoutId_);
     }
 
     // Step 2 relies on the DAO, TIDAL stakers propose (the Step 3 request) and vote
@@ -163,6 +179,8 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
         request.executed = false;
         request.voteCount = 0;
         payoutAmountRequestMap[assetIndex_][payoutId_] = request;
+
+        emit RequestPayoutAmount(assetIndex_, payoutId_, toAddress_, sellerAmount_, guarantorAmount_, stakingAmount_);
     }
 
     // Step 3 (vote & execute), called by commitee members directly.
@@ -185,5 +203,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
                 payoutId_, request.toAddress, request.stakingAmount);
             request.executed = true;
         }
+
+        emit ConfirmPayoutAmountRequest(msg.sender, assetIndex_, payoutId_);
     }
 }

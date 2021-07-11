@@ -12,7 +12,7 @@ contract UpdateHelper is BaseRelayRecipient {
     string public override versionRecipient = "1.0.0";
 
     IRegistry public registry;
-    
+
     constructor (IRegistry registry_) public {
         registry = registry_;
     }

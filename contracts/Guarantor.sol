@@ -79,6 +79,18 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     // who => assetIndex => payoutId
     mapping(address => mapping(uint16 => uint256)) public userPayoutIdMap;
 
+    event Update(address indexed who_);
+    event Deposit(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event ReduceDeposit(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event Withdraw(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event WithdrawReady(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event ClaimPremium(address indexed who_, uint256 amount_);
+    event ClaimBonus(address indexed who_, uint256 amount_);
+    event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
+    event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
+    event DoPayout(address indexed who_, uint16 indexed assetIndex_, uint256 indexed payoutId_, uint256 amount_);
+    event FinishPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
+
     constructor (IRegistry registry_) public {
         registry = registry_;
     }
@@ -168,6 +180,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
         // Update week.
         userInfo[who_].week = week;
+
+        emit Update(who_);
     }
 
     function isAssetLocked(address who_, uint16 assetIndex_) public view returns(bool) {
@@ -189,6 +203,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         IERC20(token).safeTransferFrom(_msgSender(), address(this), amount_);
 
         userBalance[_msgSender()][assetIndex_].futureBalance = userBalance[_msgSender()][assetIndex_].futureBalance.add(amount_);
+
+        emit Deposit(_msgSender(), assetIndex_, amount_);
     }
 
     function reduceDeposit(uint16 assetIndex_, uint256 amount_) external lock {
@@ -202,6 +218,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         IERC20(token).safeTransfer(_msgSender(), amount_);
 
         userBalance[_msgSender()][assetIndex_].futureBalance = userBalance[_msgSender()][assetIndex_].futureBalance.sub(amount_);
+
+        emit ReduceDeposit(_msgSender(), assetIndex_, amount_);
     }
 
     function withdraw(uint16 assetIndex_, uint256 amount_) external {
@@ -217,6 +235,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         request.time = getNow();
         request.executed = false;
         withdrawRequestMap[_msgSender()][getUnlockWeek()][assetIndex_] = request;
+
+        emit Withdraw(_msgSender(), assetIndex_, amount_);
     }
 
     function withdrawReady(address who_, uint16 assetIndex_) external lock {
@@ -238,15 +258,21 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(request.amount);
 
         request.executed = true;
+
+        emit WithdrawReady(_msgSender(), assetIndex_, request.amount);
     }
 
     function claimPremium() external lock {
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].premium);
+        emit ClaimPremium(_msgSender(), userInfo[_msgSender()].premium);
+
         userInfo[_msgSender()].premium = 0;
     }
 
     function claimBonus() external lock {
         IERC20(registry.tidalToken()).safeTransfer(_msgSender(), userInfo[_msgSender()].bonus);
+        emit ClaimBonus(_msgSender(), userInfo[_msgSender()].bonus);
+
         userInfo[_msgSender()].bonus = 0;
     }
 
@@ -255,6 +281,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
         require(payoutId_ == payoutIdMap[assetIndex_] + 1, "payoutId should be increasing");
         payoutIdMap[assetIndex_] = payoutId_;
+
+        emit StartPayout(assetIndex_, payoutId_);
     }
 
     function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external override {
@@ -271,6 +299,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         payoutInfo[assetIndex_][payoutId_].unitPerShare = total_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
         payoutInfo[assetIndex_][payoutId_].paid = 0;
         payoutInfo[assetIndex_][payoutId_].finished = false;
+
+        emit SetPayout(assetIndex_, payoutId_, toAddress_, total_);
     }
 
     // This function can be called by anyone.
@@ -294,6 +324,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         userBalance[who_][assetIndex_].futureBalance = userBalance[who_][assetIndex_].futureBalance.sub(amountToPay);
         assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
         payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
+
+        emit DoPayout(who_, assetIndex_, payoutId, amountToPay);
     }
 
     // This function can be called by anyone as long as he will pay for the difference.
@@ -316,5 +348,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
                            payoutInfo[assetIndex_][payoutId_].total);
 
         payoutInfo[assetIndex_][payoutId_].finished = true;
+
+        emit FinishPayout(assetIndex_, payoutId_);
     }
 }

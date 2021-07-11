@@ -61,6 +61,12 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
     // who => assetIndex + 1
     mapping(address => uint16) public buyerAssetIndexPlusOne;
 
+    event Update(address indexed who_);
+    event Deposit(address indexed who_, uint256 amount_);
+    event Withdraw(address indexed who_, uint256 amount_);
+    event Subscribe(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event Unsubscribe(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+
     constructor (IRegistry registry_) public {
         registry = registry_;
     }
@@ -224,6 +230,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         }
 
         userInfoMap[who_].weekUpdated = currentWeek;  // This week.
+
+        emit Update(who_);
     }
 
     // Deposit
@@ -232,6 +240,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
         userInfoMap[_msgSender()].balance = userInfoMap[_msgSender()].balance.add(amount_);
+
+        emit Deposit(_msgSender(), amount_);
     }
 
     // Withdraw
@@ -239,6 +249,8 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         require(userInfoMap[_msgSender()].balance >= amount_, "not enough balance");
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
         userInfoMap[_msgSender()].balance = userInfoMap[_msgSender()].balance.sub(amount_);
+
+        emit Withdraw(_msgSender(), amount_);
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
@@ -246,11 +258,15 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);
+
+        emit Subscribe(_msgSender(), assetIndex_, amount_);
     }
 
     function unsubscribe(uint16 assetIndex_, uint256 amount_) external {
         require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].sub(amount_);
+
+        emit Unsubscribe(_msgSender(), assetIndex_, amount_);
     }
 }

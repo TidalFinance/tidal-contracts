@@ -437,7 +437,16 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         userBalance[who_][category].currentBalance = userBalance[who_][category].currentBalance.sub(amountToPay);
         userBalance[who_][category].futureBalance = userBalance[who_][category].futureBalance.sub(amountToPay);
         categoryBalance[category] = categoryBalance[category].sub(amountToPay);
-        assetBalance[assetIndex_] = assetBalance[assetIndex_].sub(amountToPay);
+
+        // Reduce asset balance of all assets in the user's basket.
+        for (uint256 i = 0;
+                i < IAssetManager(registry.assetManager()).getIndexesByCategoryLength(category);
+                ++i) {
+            uint16 index = uint16(IAssetManager(registry.assetManager()).getIndexesByCategory(category, i));
+            if (userBasket[who_][index]) {
+                assetBalance[index] = assetBalance[index].sub(amountToPay);
+            }
+        }
 
         payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
     }

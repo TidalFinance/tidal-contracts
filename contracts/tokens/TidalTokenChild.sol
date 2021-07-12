@@ -9,7 +9,7 @@ import "./matic/NativeMetaTransaction.sol";
 import "./GovernanceToken.sol";
 
 contract TidalTokenChild is
-    GovernanceToken("Tidal Token", "TIL"),
+    GovernanceToken("Tidal Token", "TIDAL"),
     IChildToken,
     AccessControlMixin,
     NativeMetaTransaction,

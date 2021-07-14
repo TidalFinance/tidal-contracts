@@ -113,7 +113,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         return userInfoMap[who_].balance;
     }
 
-    function _refundAndUtilize(uint16 assetIndex_) private {
+    function _maybeRefundOverSubscribed(uint16 assetIndex_) private {
         uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
 
         // Maybe refund to buyer if over-subscribed in the past week, with past premium rate (assetUtilization).
@@ -127,7 +127,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
             // No need to refund.
             premiumToRefund[assetIndex_] = 0;
         }
+    }
 
+    function _calculateAssetUtilization(uint16 assetIndex_) private {
         // Calculate new assetUtilization from currentSubscription and sellerAssetBalance
         if (sellerAssetBalance == 0) {
             assetUtilization[assetIndex_] = registry.UTILIZATION_BASE();
@@ -153,26 +155,28 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
             for (uint16 index = 0;
                     index < IAssetManager(registry.assetManager()).getAssetLength();
                     ++index) {
+                _maybeRefundOverSubscribed(index);
+                _calculateAssetUtilization(index);
+
                 if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
-                  continue;
+                    premiumForGuarantor[index] = 0;
+                    premiumForSeller[index] = 0;
+                } else {
+                    uint256 premiumOfAsset = currentSubscription[index].mul(
+                        getPremiumRate(index)).div(registry.PREMIUM_BASE());
+
+                    premiumForGuarantor[index] = premiumOfAsset.mul(
+                        registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
+                    totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
+
+                    feeForPlatform = feeForPlatform.add(
+                        premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
+
+                    premiumForSeller[index] = premiumOfAsset.mul(
+                        registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
+                            registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
+                    totalForSeller = totalForSeller.add(premiumForSeller[index]);
                 }
-
-                _refundAndUtilize(index);
-
-                uint256 premiumOfAsset = currentSubscription[index].mul(
-                    getPremiumRate(index)).div(registry.PREMIUM_BASE());
-
-                premiumForGuarantor[index] = premiumOfAsset.mul(
-                    registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
-                totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
-
-                feeForPlatform = feeForPlatform.add(
-                    premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
-
-                premiumForSeller[index] = premiumOfAsset.mul(
-                    registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
-                        registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
-                totalForSeller = totalForSeller.add(premiumForSeller[index]);
             }
 
             IERC20(registry.baseToken()).safeTransfer(registry.platform(), feeForPlatform);

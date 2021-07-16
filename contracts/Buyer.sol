@@ -113,9 +113,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         return userInfoMap[who_].balance;
     }
 
-    function _maybeRefundOverSubscribed(uint16 assetIndex_) private {
-        uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
-
+    function _maybeRefundOverSubscribed(uint16 assetIndex_, uint256 sellerAssetBalance) private {
         // Maybe refund to buyer if over-subscribed in the past week, with past premium rate (assetUtilization).
         if (currentSubscription[assetIndex_] > sellerAssetBalance) {
             premiumToRefund[assetIndex_] = currentSubscription[assetIndex_].sub(sellerAssetBalance).mul(
@@ -129,7 +127,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         }
     }
 
-    function _calculateAssetUtilization(uint16 assetIndex_) private {
+    function _calculateAssetUtilization(uint16 assetIndex_, uint256 sellerAssetBalance) private {
         // Calculate new assetUtilization from currentSubscription and sellerAssetBalance
         if (sellerAssetBalance == 0) {
             assetUtilization[assetIndex_] = registry.UTILIZATION_BASE();
@@ -155,8 +153,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
             for (uint16 index = 0;
                     index < IAssetManager(registry.assetManager()).getAssetLength();
                     ++index) {
-                _maybeRefundOverSubscribed(index);
-                _calculateAssetUtilization(index);
+                uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(index);
+                _maybeRefundOverSubscribed(index, sellerAssetBalance);
+                _calculateAssetUtilization(index, sellerAssetBalance);
 
                 if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
                     premiumForGuarantor[index] = 0;

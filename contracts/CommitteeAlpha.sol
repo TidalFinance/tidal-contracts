@@ -152,7 +152,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
         if (request.voteCount >= commiteeVoteThreshod) {
             ISeller(registry.seller()).startPayout(request.assetIndex, payoutId_);
             IGuarantor(registry.guarantor()).startPayout(request.assetIndex, payoutId_);
-            IStaking(registry.staking()).startPayout(payoutId_);
+            IStaking(registry.staking()).startPayout(request.assetIndex, payoutId_);
             request.executed = true;
         }
 
@@ -200,7 +200,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
             IGuarantor(registry.guarantor()).setPayout(
                 assetIndex_, payoutId_, request.toAddress, request.guarantorAmount);
             IStaking(registry.staking()).setPayout(
-                payoutId_, request.toAddress, request.stakingAmount);
+                assetIndex_, payoutId_, request.toAddress, request.stakingAmount);
             request.executed = true;
         }
 

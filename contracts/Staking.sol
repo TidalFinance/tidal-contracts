@@ -70,22 +70,26 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         bool finished;
     }
 
-    // payoutId => PayoutInfo
-    mapping(uint256 => PayoutInfo) public payoutInfo;
+    // assetIndex => payoutId => PayoutInfo
+    mapping(uint16 => mapping(uint256 => PayoutInfo)) public payoutInfo;
 
-    uint256 public payoutId;
+    // assetIndex => payoutId
+    mapping(uint16 => uint256) public payoutIdMap;
 
-    // who => payoutId
-    mapping(address => uint256) userPayoutIdMap;
+    // who => assetIndex => payoutId
+    mapping(address => mapping(uint16 => uint256)) public userPayoutIdMap;
+
+    mapping(address => uint256) public userLockedAssetCount;
+    uint256 public lockedAssetCount;
 
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
     event WithdrawReady(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
-    event StartPayout(uint256 indexed payoutId_);
-    event SetPayout(uint256 indexed payoutId_, address toAddress_, uint256 total_);
-    event DoPayout(address indexed who_, uint256 indexed payoutId_, uint256 amount_);
-    event FinishPayout(uint256 indexed payoutId_);
+    event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
+    event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
+    event DoPayout(address indexed who_, uint16 indexed assetIndex_, uint256 indexed payoutId_, uint256 amount_);
+    event FinishPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
 
     constructor (IRegistry registry_) public {
         registry = registry_;
@@ -177,7 +181,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     }
 
     function deposit(uint256 amount_) external lock {
-        require(!hasPendingPayout(), "Has pending payout");
+        require(!isPoolLocked(), "Is pool locked");
 
         UserInfo storage user = userInfo[_msgSender()];
         updatePool();
@@ -204,7 +208,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     }
 
     function withdraw(uint256 amount_) external {
-        require(!hasPendingPayout(), "Has pending payout");
+        require(!isPoolLocked(), "Is pool locked");
 
         UserInfo storage user = userInfo[_msgSender()];
         require(user.amount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
@@ -274,45 +278,44 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         emit Claim(_msgSender(), rewardTotal);
     }
 
-    function isAssetLocked(address who_) external view returns(bool) {
-        return payoutId > 0 && !payoutInfo[payoutId].finished && userPayoutIdMap[who_] < payoutId;
+    function isPoolLocked() public view returns(bool) {
+        return lockedAssetCount > 0;
     }
 
-    function hasPendingPayout() public view returns(bool) {
-        return payoutId > 0 && !payoutInfo[payoutId].finished;
+    function startPayout(uint16 assetIndex_, uint256 payoutId_) external override {
+        require(msg.sender == registry.committee(), "Only commitee can call");
+        require(payoutId_ == payoutIdMap[assetIndex_] + 1, "payoutId should be increasing");
+
+        payoutIdMap[assetIndex_] = payoutId_;
+        lockedAssetCount = lockedAssetCount.add(1);
+
+        emit StartPayout(assetIndex_, payoutId_);
     }
 
-    function startPayout(uint256 payoutId_) external override {
+    function setPayout(uint16 assetIndex_, uint256 payoutId_, address toAddress_, uint256 total_) external override {
         require(msg.sender == registry.committee(), "Only commitee can call");
 
-        require(payoutId_ == payoutId + 1, "payoutId should be increasing");
-        payoutId = payoutId_;
-
-        emit StartPayout(payoutId_);
-    }
-
-    function setPayout(uint256 payoutId_, address toAddress_, uint256 total_) external override {
-        require(msg.sender == registry.committee(), "Only commitee can call");
-
-        require(payoutId_ == payoutId, "payoutId should be started");
-        require(payoutInfo[payoutId_].toAddress == address(0), "already set");
+        require(payoutId_ == payoutIdMap[assetIndex_], "payoutId should be started");
+        require(payoutInfo[assetIndex_][payoutId_].toAddress == address(0), "already set");
 
         uint256 tokenTotal = poolInfo.amount;
 
         require(total_ <= tokenTotal, "More than token total");
 
-        payoutInfo[payoutId_].toAddress = toAddress_;
-        payoutInfo[payoutId_].total = total_;
-        payoutInfo[payoutId_].unitPerShare = total_.mul(UNIT_PER_SHARE).div(tokenTotal);
-        payoutInfo[payoutId_].paid = 0;
-        payoutInfo[payoutId_].finished = false;
+        payoutInfo[assetIndex_][payoutId_].toAddress = toAddress_;
+        payoutInfo[assetIndex_][payoutId_].total = total_;
+        payoutInfo[assetIndex_][payoutId_].unitPerShare = total_.mul(UNIT_PER_SHARE).div(tokenTotal);
+        payoutInfo[assetIndex_][payoutId_].paid = 0;
+        payoutInfo[assetIndex_][payoutId_].finished = false;
 
-        emit SetPayout(payoutId_, toAddress_, total_);
+        emit SetPayout(assetIndex_, payoutId_, toAddress_, total_);
     }
 
-    function doPayout(address who_) external {
-        require(payoutInfo[payoutId].toAddress != address(0), "not set");
-        require(userPayoutIdMap[who_] < payoutId, "Already paid");
+    function doPayout(uint16 assetIndex_, address who_) external {
+        uint256 payoutId = payoutIdMap[assetIndex_];
+
+        require(payoutInfo[assetIndex_][payoutId].toAddress != address(0), "not set");
+        require(userPayoutIdMap[who_][assetIndex_] < payoutId, "Already paid");
 
         UserInfo storage user = userInfo[who_];
         updatePool();
@@ -323,39 +326,44 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        userPayoutIdMap[who_] = payoutId;
+        userPayoutIdMap[who_][assetIndex_] = payoutId;
 
-        if (payoutInfo[payoutId].finished) {
+        if (payoutInfo[assetIndex_][payoutId].finished) {
           // In case someone paid for the difference.
           return;
         }
 
-        uint256 amountToPay = user.amount.mul(payoutInfo[payoutId].unitPerShare).div(UNIT_PER_SHARE);
+        uint256 amountToPay = user.amount.mul(payoutInfo[assetIndex_][payoutId].unitPerShare).div(UNIT_PER_SHARE);
 
         user.amount = user.amount.sub(amountToPay);
         poolInfo.amount = poolInfo.amount.sub(amountToPay);
 
-        payoutInfo[payoutId].paid = payoutInfo[payoutId].paid.add(amountToPay);
+        payoutInfo[assetIndex_][payoutId].paid = payoutInfo[assetIndex_][payoutId].paid.add(amountToPay);
 
         user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
 
-        emit DoPayout(who_, payoutId, amountToPay);
+        emit DoPayout(who_, assetIndex_, payoutId, amountToPay);
     }
 
-    function finishPayout(uint256 payoutId_) external {
-        require(!payoutInfo[payoutId_].finished, "already finished");
+    function finishPayout(uint16 assetIndex_, uint256 payoutId_) external {
+        require(payoutId_ <= payoutIdMap[assetIndex_], "payoutId should be valid");
+        require(!payoutInfo[assetIndex_][payoutId_].finished, "already finished");
 
-        if (payoutInfo[payoutId_].paid < payoutInfo[payoutId_].total) {
+        if (payoutInfo[assetIndex_][payoutId_].paid < payoutInfo[assetIndex_][payoutId_].total) {
             // In case there is still small error, you, the caller please pay for it.
-            IERC20(registry.tidalToken()).transferFrom(msg.sender, address(this), payoutInfo[payoutId_].total - payoutInfo[payoutId_].paid);
-            payoutInfo[payoutId_].paid = payoutInfo[payoutId_].total;
+            IERC20(registry.tidalToken()).transferFrom(msg.sender,
+                address(this),
+                payoutInfo[assetIndex_][payoutId_].total.sub(payoutInfo[assetIndex_][payoutId_].paid));
+            payoutInfo[assetIndex_][payoutId_].paid = payoutInfo[assetIndex_][payoutId_].total;
         }
 
-        IERC20(registry.tidalToken()).transfer(payoutInfo[payoutId_].toAddress, payoutInfo[payoutId_].total);
+        IERC20(registry.tidalToken()).transfer(payoutInfo[assetIndex_][payoutId_].toAddress,
+                                               payoutInfo[assetIndex_][payoutId_].total);
 
-        payoutInfo[payoutId_].finished = true;
+        payoutInfo[assetIndex_][payoutId_].finished = true;
+        lockedAssetCount = lockedAssetCount.sub(1);
 
-        emit FinishPayout(payoutId_);
+        emit FinishPayout(assetIndex_, payoutId_);
     }
 
     function getWithdrawRequestBackwards(address who_, uint256 offset_, uint256 limit_) external view returns(WithdrawRequest[] memory) {

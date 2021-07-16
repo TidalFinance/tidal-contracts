@@ -172,7 +172,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
                 poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
 
             // Update balances and baskets if no claims.
-            if (!isAssetLocked(who_, index)) {
+            if (!isAssetLocked(index)) {
                 assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
                 userBalance[who_][index].currentBalance = futureBalance;
             }
@@ -184,19 +184,14 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         emit Update(who_);
     }
 
-    function isAssetLocked(address who_, uint16 assetIndex_) public view returns(bool) {
-        uint256 payoutId = payoutIdMap[assetIndex_];
-        return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished && userPayoutIdMap[who_][assetIndex_] < payoutId;
-    }
-
-    function hasPendingPayout(uint16 assetIndex_) public view returns(bool) {
+    function isAssetLocked(uint16 assetIndex_) public view returns(bool) {
         uint256 payoutId = payoutIdMap[assetIndex_];
         return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
     }
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
         require(!IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex_), "Asset deprecated");
-        require(!hasPendingPayout(assetIndex_), "Has pending payout");
+        require(!isAssetLocked(assetIndex_), "Is asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
@@ -223,7 +218,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     function withdraw(uint16 assetIndex_, uint256 amount_) external {
-        require(!hasPendingPayout(assetIndex_), "Has pending payout");
+        require(!isAssetLocked(assetIndex_), "Is asset locked");
 
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
@@ -242,7 +237,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     function withdrawReady(address who_, uint16 assetIndex_) external lock {
         WithdrawRequest storage request = withdrawRequestMap[who_][getCurrentWeek()][assetIndex_];
 
-        require(!hasPendingPayout(assetIndex_), "Has pending payout");
+        require(!isAssetLocked(assetIndex_), "Is asset locked");
         require(userInfo[who_].week == getCurrentWeek(), "Not updated yet");
         require(!request.executed, "already executed");
         require(request.time > 0, "No request");

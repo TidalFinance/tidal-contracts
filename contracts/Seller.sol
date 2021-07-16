@@ -156,8 +156,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
             uint16 index = IAssetManager(registry.assetManager()).getIndexesByCategory(category_, i);
             uint256 payoutId = payoutIdMap[index];
 
-            if (payoutId > 0 && !payoutInfo[index][payoutId].finished &&
-                userBasket[who_][index] && userPayoutIdMap[who_][index] < payoutId) return true;
+            if (payoutId > 0 && !payoutInfo[index][payoutId].finished && userBasket[who_][index]) return true;
         }
 
         return false;
@@ -168,7 +167,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
     }
 
-    function hasPendingPayout(uint16[] memory basketIndexes_) public view returns(bool) {
+    function isBasketLocked(uint16[] memory basketIndexes_) public view returns(bool) {
         for (uint256 i = 0; i < basketIndexes_.length; ++i) {
             uint16 assetIndex = basketIndexes_[i];
             uint256 payoutId = payoutIdMap[assetIndex];
@@ -198,7 +197,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     function changeBasket(uint8 category_, uint16[] calldata basketIndexes_) external {
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
-        require(!hasPendingPayout(basketIndexes_), "Has pending payout");
+        require(!isBasketLocked(basketIndexes_), "Is basket locked");
         require(!hasDeprecatedAsset(basketIndexes_), "Has deprecated asset");
 
         if (userBalance[_msgSender()][category_].currentBalance == 0) {

@@ -82,10 +82,11 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     mapping(address => uint256) public userLockedAssetCount;
     uint256 public lockedAssetCount;
 
-    event Deposit(address indexed user, uint256 amount);
-    event Withdraw(address indexed user, uint256 amount);
-    event WithdrawReady(address indexed user, uint256 amount);
-    event Claim(address indexed user, uint256 amount);
+    event Deposit(address indexed user_, uint256 amount_);
+    event Withdraw(address indexed user_, uint256 amount_);
+    event WithdrawReady(address indexed user_, uint256 amount_);
+    event WithdrawCancel(address indexed user_, uint256 index_);
+    event Claim(address indexed user_, uint256 amount_);
     event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
     event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
     event DoPayout(address indexed who_, uint16 indexed assetIndex_, uint256 indexed payoutId_, uint256 amount_);
@@ -231,6 +232,14 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         require(request.time > 0, "Non-existing request");
         require(getNow() > request.time.add(registry.stakingWithdrawWaitTime()), "Not ready yet");
         require(!request.executed, "already executed");
+
+        if (isPoolLocked()) {
+            // Updates total withdraw amount in pending.
+            withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
+
+            emit WithdrawCancel(who_, index_);
+            return;
+        }
 
         UserInfo storage user = userInfo[who_];
 

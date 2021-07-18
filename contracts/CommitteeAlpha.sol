@@ -27,7 +27,7 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
     address[] public members;
     mapping(address => uint256) public memberIndexPlusOne;  // index + 1
 
-    uint256 public feeToRequestPayout = 20e18;
+    uint256 public feeToRequestPayout = 20e6;
     uint256 public maximumRequestDuration = 3 days;
 
     struct PayoutStartRequest {

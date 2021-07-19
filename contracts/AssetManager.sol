@@ -11,7 +11,6 @@ contract AssetManager is IAssetManager, Ownable {
     struct Asset {
         address token;
         uint8 category;  // 0 - low, 1 - medium, 2 - high
-        bool deprecated;
     }
 
     uint8 public categoryLength;
@@ -36,16 +35,12 @@ contract AssetManager is IAssetManager, Ownable {
         }
     }
 
-    function setDeprecated(uint16 index_, bool deprecated_) external onlyOwner {
-        assets[index_].deprecated = deprecated_;
-    }
-
     // Anyone can call this function, but it doesn't matter.
     function resetIndexesByCategory(uint8 category_) external {
         delete indexesByCategory[category_];
 
         for (uint16 i = 0; i < uint16(assets.length); ++i) {
-            if (assets[i].category == category_ && !assets[i].deprecated) {
+            if (assets[i].category == category_) {
                 indexesByCategory[category_].push(i);
             }
         }
@@ -65,10 +60,6 @@ contract AssetManager is IAssetManager, Ownable {
 
     function getAssetCategory(uint16 index_) external override view returns(uint8) {
         return assets[index_].category;
-    }
-
-    function getAssetDeprecated(uint16 index_) external override view returns(bool) {
-        return assets[index_].deprecated;
     }
 
     function getIndexesByCategory(uint8 category_, uint256 categoryIndex_) external override view returns(uint16) {

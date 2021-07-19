@@ -177,15 +177,6 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         return false;
     }
 
-    function hasDeprecatedAsset(uint16[] memory basketIndexes_) public view returns(bool) {
-        for (uint256 i = 0; i < basketIndexes_.length; ++i) {
-            uint16 assetIndex = basketIndexes_[i];
-            if (IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex)) return true;
-        }
-
-        return false;
-    }
-
     function hasIndex(uint16[] memory basketIndexes_, uint16 index_) public pure returns(bool) {
         for (uint256 i = 0; i < basketIndexes_.length; ++i) {
             if (basketIndexes_[i] == index_) return true;
@@ -198,7 +189,6 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
         require(!isBasketLocked(basketIndexes_), "Is basket locked");
-        require(!hasDeprecatedAsset(basketIndexes_), "Has deprecated asset");
 
         if (userBalance[_msgSender()][category_].currentBalance == 0) {
             // Change now.
@@ -277,10 +267,6 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         for (index = 0;
                 index < IAssetManager(registry.assetManager()).getAssetLength();
                 ++index) {
-            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
-              continue;
-            }
-
             require(poolInfo[index].weekOfPremium == week &&
                 poolInfo[index].weekOfBonus == week, "Not ready");
         }
@@ -291,10 +277,6 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         for (index = 0;
                 index < IAssetManager(registry.assetManager()).getAssetLength();
                 ++index) {
-            if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
-              continue;
-            }
-
             category = IAssetManager(registry.assetManager()).getAssetCategory(index);
             uint256 currentBalance = userBalance[who_][category].currentBalance;
             uint256 futureBalance = userBalance[who_][category].futureBalance;

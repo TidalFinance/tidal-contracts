@@ -113,26 +113,26 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         return userInfoMap[who_].balance;
     }
 
-    function _maybeRefundOverSubscribed(uint16 assetIndex_, uint256 sellerAssetBalance) private {
+    function _maybeRefundOverSubscribed(uint16 assetIndex_, uint256 sellerAssetBalance_) private {
         // Maybe refund to buyer if over-subscribed in the past week, with past premium rate (assetUtilization).
-        if (currentSubscription[assetIndex_] > sellerAssetBalance) {
-            premiumToRefund[assetIndex_] = currentSubscription[assetIndex_].sub(sellerAssetBalance).mul(
+        if (currentSubscription[assetIndex_] > sellerAssetBalance_) {
+            premiumToRefund[assetIndex_] = currentSubscription[assetIndex_].sub(sellerAssetBalance_).mul(
                 getPremiumRate(assetIndex_)).div(registry.PREMIUM_BASE());
 
             // Reduce currentSubscription (not too late).
-            currentSubscription[assetIndex_] = sellerAssetBalance;
+            currentSubscription[assetIndex_] = sellerAssetBalance_;
         } else {
             // No need to refund.
             premiumToRefund[assetIndex_] = 0;
         }
     }
 
-    function _calculateAssetUtilization(uint16 assetIndex_, uint256 sellerAssetBalance) private {
+    function _calculateAssetUtilization(uint16 assetIndex_, uint256 sellerAssetBalance_) private {
         // Calculate new assetUtilization from currentSubscription and sellerAssetBalance
-        if (sellerAssetBalance == 0) {
+        if (sellerAssetBalance_ == 0) {
             assetUtilization[assetIndex_] = registry.UTILIZATION_BASE();
         } else {
-            assetUtilization[assetIndex_] = currentSubscription[assetIndex_] * registry.UTILIZATION_BASE() / sellerAssetBalance;
+            assetUtilization[assetIndex_] = currentSubscription[assetIndex_] * registry.UTILIZATION_BASE() / sellerAssetBalance_;
         }
 
         // Premium rate also changed.
@@ -157,25 +157,20 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
                 _maybeRefundOverSubscribed(index, sellerAssetBalance);
                 _calculateAssetUtilization(index, sellerAssetBalance);
 
-                if (IAssetManager(registry.assetManager()).getAssetDeprecated(index)) {
-                    premiumForGuarantor[index] = 0;
-                    premiumForSeller[index] = 0;
-                } else {
-                    uint256 premiumOfAsset = currentSubscription[index].mul(
-                        getPremiumRate(index)).div(registry.PREMIUM_BASE());
+                uint256 premiumOfAsset = currentSubscription[index].mul(
+                    getPremiumRate(index)).div(registry.PREMIUM_BASE());
 
-                    premiumForGuarantor[index] = premiumOfAsset.mul(
-                        registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
-                    totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
+                premiumForGuarantor[index] = premiumOfAsset.mul(
+                    registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
+                totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
 
-                    feeForPlatform = feeForPlatform.add(
-                        premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
+                feeForPlatform = feeForPlatform.add(
+                    premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
 
-                    premiumForSeller[index] = premiumOfAsset.mul(
-                        registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
-                            registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
-                    totalForSeller = totalForSeller.add(premiumForSeller[index]);
-                }
+                premiumForSeller[index] = premiumOfAsset.mul(
+                    registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
+                        registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
+                totalForSeller = totalForSeller.add(premiumForSeller[index]);
             }
 
             IERC20(registry.baseToken()).safeTransfer(registry.platform(), feeForPlatform);
@@ -201,8 +196,7 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         // Maybe refund to user.
         userInfoMap[who_].balance = userInfoMap[who_].balance.add(premiumToRefund[buyerAssetIndex]);
 
-        if (ISeller(registry.seller()).isAssetLocked(buyerAssetIndex) ||
-                IAssetManager(registry.assetManager()).getAssetDeprecated(buyerAssetIndex)) {
+        if (ISeller(registry.seller()).isAssetLocked(buyerAssetIndex)) {
             // Stops user's current and future subscription.
             currentSubscription[buyerAssetIndex] = 0;
             futureSubscription[buyerAssetIndex] = 0;
@@ -227,8 +221,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
                     currentSubscription[buyerAssetIndex] = 0;
                 }
             } else {
-                // Stops user's current subscription.
+                // Stops user's current and future subscription.
                 currentSubscription[buyerAssetIndex] = 0;
+                futureSubscription[buyerAssetIndex] = 0;
             }
         }
 
@@ -257,7 +252,6 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
     }
 
     function subscribe(uint16 assetIndex_, uint256 amount_) external {
-        require(!IAssetManager(registry.assetManager()).getAssetDeprecated(assetIndex_), "Asset deprecated");
         require(getBuyerAssetIndex(_msgSender()) == assetIndex_, "not whitelisted buyer and assetIndex");
 
         futureSubscription[assetIndex_] = futureSubscription[assetIndex_].add(amount_);

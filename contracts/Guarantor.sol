@@ -111,10 +111,13 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
         uint256 amount = IBuyer(registry.buyer()).premiumForGuarantor(assetIndex_);
 
-        if (assetBalance[assetIndex_] > 0) {
+        if (assetBalance[assetIndex_] > 0 &&
+                IAssetManager(registry.assetManager()).getAssetToken(assetIndex_) != address(0)) {
             IERC20(registry.baseToken()).safeTransferFrom(registry.buyer(), address(this), amount);
             poolInfo[assetIndex_].premiumPerShare =
                 amount.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
+        } else {
+            poolInfo[assetIndex_].premiumPerShare = 0;
         }
 
         poolInfo[assetIndex_].weekOfPremium = week;
@@ -128,10 +131,13 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
         require(poolInfo[assetIndex_].weekOfBonus < week, "already updated");
 
-        if (assetBalance[assetIndex_] > 0) {
+        if (assetBalance[assetIndex_] > 0 && 
+                IAssetManager(registry.assetManager()).getAssetToken(assetIndex_) != address(0)) {
             IERC20(registry.tidalToken()).safeTransferFrom(msg.sender, address(this), amount_);
             poolInfo[assetIndex_].bonusPerShare =
                 amount_.mul(registry.UNIT_PER_SHARE()).div(assetBalance[assetIndex_]);
+        } else {
+            poolInfo[assetIndex_].bonusPerShare = 0;
         }
 
         poolInfo[assetIndex_].weekOfBonus = week;
@@ -186,6 +192,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
+        require(token != address(0), "No token address");
+
         IERC20(token).safeTransferFrom(_msgSender(), address(this), amount_);
 
         userBalance[_msgSender()][assetIndex_].futureBalance = userBalance[_msgSender()][assetIndex_].futureBalance.add(amount_);
@@ -201,6 +209,8 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
             userBalance[_msgSender()][assetIndex_].currentBalance), "Not enough future balance");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
+        require(token != address(0), "No token address");
+
         IERC20(token).safeTransfer(_msgSender(), amount_);
 
         userBalance[_msgSender()][assetIndex_].futureBalance = userBalance[_msgSender()][assetIndex_].futureBalance.sub(amount_);
@@ -209,6 +219,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     function withdraw(uint16 assetIndex_, uint256 amount_) external {
+        require(IAssetManager(registry.assetManager()).getAssetToken(assetIndex_) != address(0), "No token address");
         require(!isAssetLocked(assetIndex_), "Is asset locked");
 
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
@@ -330,8 +341,10 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
             payoutInfo[assetIndex_][payoutId_].paid = payoutInfo[assetIndex_][payoutId_].total;
         }
 
-        IERC20(token).safeTransfer(payoutInfo[assetIndex_][payoutId_].toAddress,
-                           payoutInfo[assetIndex_][payoutId_].total);
+        if (token != address(0)) {
+            IERC20(token).safeTransfer(payoutInfo[assetIndex_][payoutId_].toAddress,
+                                       payoutInfo[assetIndex_][payoutId_].total);
+        }
 
         payoutInfo[assetIndex_][payoutId_].finished = true;
 

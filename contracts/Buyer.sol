@@ -160,16 +160,26 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
                 uint256 premiumOfAsset = currentSubscription[index].mul(
                     getPremiumRate(index)).div(registry.PREMIUM_BASE());
 
-                premiumForGuarantor[index] = premiumOfAsset.mul(
-                    registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
-                totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
-
                 feeForPlatform = feeForPlatform.add(
                     premiumOfAsset.mul(registry.platformPercentage()).div(registry.PERCENTAGE_BASE()));
 
-                premiumForSeller[index] = premiumOfAsset.mul(
-                    registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
-                        registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
+                if (IAssetManager(registry.assetManager()).getAssetToken(index) == address(0)) {
+                    // When guarantor pool doesn't exist.
+                    premiumForGuarantor[index] = 0;
+                    premiumForSeller[index] = premiumOfAsset.mul(
+                        registry.PERCENTAGE_BASE().sub(
+                            registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
+                } else {
+                    // When guarantor pool exists.
+                    premiumForGuarantor[index] = premiumOfAsset.mul(
+                        registry.guarantorPercentage()).div(registry.PERCENTAGE_BASE());
+                    totalForGuarantor = totalForGuarantor.add(premiumForGuarantor[index]);
+
+                    premiumForSeller[index] = premiumOfAsset.mul(
+                        registry.PERCENTAGE_BASE().sub(registry.guarantorPercentage()).sub(
+                            registry.platformPercentage())).div(registry.PERCENTAGE_BASE());
+                }
+
                 totalForSeller = totalForSeller.add(premiumForSeller[index]);
             }
 

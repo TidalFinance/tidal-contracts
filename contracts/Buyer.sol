@@ -83,10 +83,9 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         return registry.trustedForwarder();
     }
 
-    // Set buyer asset index
-    function setBuyerAssetIndex(address who_, uint16 assetIndex_) external onlyOwner {
-        // No safe math for uint16, but please make sure no overflow.
-        buyerAssetIndexPlusOne[who_] = assetIndex_ + 1;
+    // Set buyer asset index. When 0, it's cleared.
+    function setBuyerAssetIndexPlusOne(address who_, uint16 assetIndexPlusOne_) external onlyOwner {
+        buyerAssetIndexPlusOne[who_] = assetIndexPlusOne_;
     }
 
     // Get buyer asset index

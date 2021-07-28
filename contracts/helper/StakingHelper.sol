@@ -31,6 +31,6 @@ contract StakingHelper {
            blockNumber = 2102400;
         }
         
-        apr = rewardPerBlock.mul(blockNumber).div(totalSupply);
+        apr = rewardPerBlock.mul(blockNumber).mul(10000).div(totalSupply);  // APR multiply by 10000
     }
 }

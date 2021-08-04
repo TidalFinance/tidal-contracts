@@ -232,6 +232,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         if (isPoolLocked()) {
             // Updates total withdraw amount in pending.
             withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
+            request.executed = true;
 
             emit WithdrawCancel(who_, index_);
             return;

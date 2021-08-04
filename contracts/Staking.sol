@@ -339,6 +339,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
 
         if (payoutInfo[assetIndex_][payoutId].finished) {
           // In case someone paid for the difference.
+          user.rewardDebt = user.amount.mul(poolInfo.accRewardPerShare).div(UNIT_PER_SHARE);
           return;
         }
 

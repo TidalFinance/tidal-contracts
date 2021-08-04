@@ -105,9 +105,9 @@ contract CommitteeAlpha is Ownable, NonReentrancy, BaseRelayRecipient {
         if (indexPlusOne < members.length) {
             members[indexPlusOne.sub(1)] = members[members.length.sub(1)];
             memberIndexPlusOne[members[indexPlusOne.sub(1)]] = indexPlusOne;
-            memberIndexPlusOne[who_] = 0;
         }
 
+        memberIndexPlusOne[who_] = 0;
         members.pop();
     }
 

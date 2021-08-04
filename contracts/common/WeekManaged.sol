@@ -5,14 +5,12 @@ abstract contract WeekManaged {
 
     uint256 public offset = 4 days;
 
-    function _timeExtra() internal virtual view returns(uint256);
-
     function getCurrentWeek() public view returns(uint256) {
-        return (now + offset + _timeExtra()) / (7 days);
+        return (now + offset) / (7 days);
     }
 
     function getNow() public view returns(uint256) {
-        return now + _timeExtra();
+        return now;
     }
 
     function getUnlockWeek() public view returns(uint256) {

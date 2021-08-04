@@ -8,8 +8,6 @@ interface IRegistry {
     function PREMIUM_BASE() external pure returns(uint256);
     function UNIT_PER_SHARE() external pure returns(uint256);
 
-    function timeExtra() external view returns(uint256);
-
     function buyer() external view returns(address);
     function seller() external view returns(address);
     function guarantor() external view returns(address);

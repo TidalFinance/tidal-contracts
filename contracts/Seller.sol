@@ -109,10 +109,6 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         registry = registry_;
     }
 
-    function _timeExtra() internal override view returns(uint256) {
-        return registry.timeExtra();
-    }
-
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
     }

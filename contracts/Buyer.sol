@@ -71,10 +71,6 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
         registry = registry_;
     }
 
-    function _timeExtra() internal override view returns(uint256) {
-        return registry.timeExtra();
-    }
-
     function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {
         return BaseRelayRecipient._msgSender();
     }

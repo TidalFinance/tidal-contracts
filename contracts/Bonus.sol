@@ -31,10 +31,6 @@ contract Bonus is IBonus, Ownable, WeekManaged {
         registry = registry_;
     }
 
-    function _timeExtra() internal override view returns(uint256) {
-        return registry.timeExtra();
-    }
-
     function setBonusPerAssetOfG(uint16 assetIndex_, uint256 value_) external onlyOwner {
         bonusPerAssetOfG[assetIndex_] = value_;
     }

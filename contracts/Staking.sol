@@ -83,9 +83,9 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     uint256 public lockedAssetCount;
 
     event Deposit(address indexed user_, uint256 amount_);
-    event Withdraw(address indexed user_, uint256 amount_);
-    event WithdrawReady(address indexed user_, uint256 amount_);
-    event WithdrawCancel(address indexed user_, uint256 index_);
+    event Withdraw(address indexed user_, uint256 index_, uint256 amount_);
+    event WithdrawReady(address indexed user_, uint256 index_, uint256 amount_);
+    event WithdrawCancel(address indexed user_, uint256 index_, uint256 amount_);
     event Claim(address indexed user_, uint256 amount_);
     event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
     event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
@@ -214,6 +214,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         UserInfo storage user = userInfo[_msgSender()];
         require(user.amount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
 
+        uint256 index = withdrawRequestMap[_msgSender()].length;
+
         withdrawRequestMap[_msgSender()].push(WithdrawRequest({
             time: getNow(),
             amount: amount_,
@@ -223,7 +225,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         // Updates total withdraw amount in pending.
         withdrawAmountMap[_msgSender()] = withdrawAmountMap[_msgSender()].add(amount_);
 
-        emit Withdraw(_msgSender(), amount_);
+        emit Withdraw(_msgSender(), index, amount_);
     }
 
     function withdrawReady(address who_, uint256 index_) external lock {
@@ -238,7 +240,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
             withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
             request.executed = true;
 
-            emit WithdrawCancel(who_, index_);
+            emit WithdrawCancel(who_, index_, request.amount);
             return;
         }
 
@@ -266,7 +268,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         // Updates total withdraw amount in pending.
         withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
 
-        emit WithdrawReady(who_, request.amount);
+        emit WithdrawReady(who_, index_, request.amount);
     }
 
 

@@ -281,17 +281,19 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
             uint256 currentBalance = userBalance[who_][category].currentBalance;
             uint256 futureBalance = userBalance[who_][category].futureBalance;
 
-            // Update premium.
-            userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
-                poolInfo[index].premiumPerShare).div(registry.UNIT_PER_SHARE()));
-
-            // Update bonus.
-            userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
-                poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
-
             // Update asset balance if no claims.
-            if (!isCategoryLocked(who_, category) && userBasket[who_][index]) {
-                assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
+            if (userBasket[who_][index]) {
+                // Update bonus.
+                userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
+                    poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
+
+                if (!isCategoryLocked(who_, category) && userBasket[who_][index]) {
+                    // Update premium.
+                    userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
+                        poolInfo[index].premiumPerShare).div(registry.UNIT_PER_SHARE()));
+
+                    assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
+                }
             }
         }
 

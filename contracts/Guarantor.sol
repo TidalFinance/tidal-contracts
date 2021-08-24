@@ -144,7 +144,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     // Called for every user every week.
-    function update(address who_) external override {
+    function update(address who_) public override {
         uint256 week = getCurrentWeek();
 
         require(userInfo[who_].week < week, "Already updated");
@@ -182,6 +182,10 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         emit Update(who_);
     }
 
+    function isFirstTime(address who_) public returns(bool) {
+        return userInfo[who_].week == 0;
+    }
+
     function isAssetLocked(uint16 assetIndex_) public view returns(bool) {
         uint256 payoutId = payoutIdMap[assetIndex_];
         return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
@@ -189,6 +193,11 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
         require(!isAssetLocked(assetIndex_), "Is asset locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);

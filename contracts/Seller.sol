@@ -187,8 +187,13 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     function changeBasket(uint8 category_, uint16[] calldata basketIndexes_) external {
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
-        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
         require(!isBasketLocked(basketIndexes_), "Is basket locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         if (userBalance[_msgSender()][category_].currentBalance == 0) {
             // Change now.
@@ -256,7 +261,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     }
 
     // Called for every user every week.
-    function update(address who_) external override {
+    function update(address who_) public override {
         // Update user's last week's premium and bonus.
         uint256 week = getCurrentWeek();
 
@@ -317,9 +322,18 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         emit Update(who_);
     }
 
+    function isFirstTime(address who_) public returns(bool) {
+        return userInfo[who_].week == 0;
+    }
+
     function deposit(uint8 category_, uint256 amount_) external lock {
         require(!registry.depositPaused(), "Deposit paused");
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);

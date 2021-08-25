@@ -182,7 +182,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         emit Update(who_);
     }
 
-    function isFirstTime(address who_) public returns(bool) {
+    function isFirstTime(address who_) public view returns(bool) {
         return userInfo[who_].week == 0;
     }
 

@@ -109,6 +109,10 @@ contract Staking is IStaking, Ownable, WeekManaged, Migratable, NonReentrancy, B
         return registry.trustedForwarder();
     }
 
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
     function migrate() external lock {
         UserInfo storage user = userInfo[_msgSender()];
 

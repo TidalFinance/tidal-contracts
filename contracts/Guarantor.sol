@@ -103,6 +103,10 @@ contract Guarantor is IGuarantor, WeekManaged, Migratable, NonReentrancy, BaseRe
         return registry.trustedForwarder();
     }
 
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
     function migrate(uint16 assetIndex_) external lock {
         uint256 balance = userBalance[_msgSender()][assetIndex_].futureBalance;
 
@@ -197,7 +201,7 @@ contract Guarantor is IGuarantor, WeekManaged, Migratable, NonReentrancy, BaseRe
         emit Update(who_);
     }
 
-    function isFirstTime(address who_) public returns(bool) {
+    function isFirstTime(address who_) public view returns(bool) {
         return userInfo[who_].week == 0;
     }
 

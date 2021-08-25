@@ -84,6 +84,10 @@ contract Buyer is IBuyer, Ownable, WeekManaged, Migratable, NonReentrancy, BaseR
         return registry.trustedForwarder();
     }
 
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
     function migrate() external lock {
         uint256 balance = userInfoMap[_msgSender()].balance;
 

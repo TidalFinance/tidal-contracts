@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
-interface IGuarantor {
+import "./IMigratable.sol";
+
+interface IGuarantor is IMigratable {
     function updateBonus(uint16 assetIndex_, uint256 amount_) external;
     function update(address who_) external;
     function startPayout(uint16 assetIndex_, uint256 payoutId_) external;

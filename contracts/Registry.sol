@@ -3,6 +3,7 @@ pragma solidity 0.6.12;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+import "./interfaces/IMigratable.sol";
 import "./interfaces/IRegistry.sol";
 
 contract Registry is Ownable, IRegistry {
@@ -51,23 +52,39 @@ contract Registry is Ownable, IRegistry {
         timeExtra = timeExtra_;
     }
 
+    // Upgradable, and migratable.
     function setBuyer(address buyer_) external onlyOwner {
-        require(buyer == address(0), "Can set only once");
+        if (buyer != address(0) && buyer_ != address(0)) {
+            IMigratable(buyer).approveMigration(IMigratable(buyer_));
+        }
+
         buyer = buyer_;
     }
 
+    // Upgradable, and migratable.
     function setSeller(address seller_) external onlyOwner {
-        require(seller == address(0), "Can set only once");
+        if (seller != address(0) && seller_ != address(0)) {
+            IMigratable(seller).approveMigration(IMigratable(seller_));
+        }
+
         seller = seller_;
     }
 
+    // Upgradable, and migratable.
     function setGuarantor(address guarantor_) external onlyOwner {
-        require(guarantor == address(0), "Can set only once");
+        if (guarantor != address(0) && guarantor_ != address(0)) {
+            IMigratable(guarantor).approveMigration(IMigratable(guarantor_));
+        }
+
         guarantor = guarantor_;
     }
 
-    // Upgradable, in case we want to change staking pool.
+    // Upgradable, and migratable.
     function setStaking(address staking_) external onlyOwner {
+        if (staking != address(0) && staking_ != address(0)) {
+            IMigratable(staking).approveMigration(IMigratable(staking_));
+        }
+
         staking = staking_;
     }
 

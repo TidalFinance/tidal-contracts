@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -14,9 +15,8 @@ import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
 import "./interfaces/IRegistry.sol";
 
-
 // This contract is not Ownable.
-contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Guarantor is IGuarantor, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -101,6 +101,21 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function migrate(uint16 assetIndex_) external lock {
+        uint256 balance = userBalance[_msgSender()][assetIndex_].futureBalance;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(balance > 0, "No balance");
+
+        userBalance[_msgSender()][assetIndex_].currentBalance = 0;
+        userBalance[_msgSender()][assetIndex_].futureBalance = 0;
+
+        address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
+
+        IERC20(token).safeTransfer(address(migrateTo), balance);
+        migrateTo.onMigration(_msgSender(), balance, abi.encodePacked(assetIndex_));
     }
 
     // Update and pay last week's premium.

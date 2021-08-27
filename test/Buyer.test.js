@@ -28,31 +28,34 @@ contract('Buyer', ([dev, seller0, buyer0]) => {
         this.seller = await Seller.new(this.registry.address, { from: dev });
         this.tidal = await TidalToken.new({ from: dev });
 
-        this.testUSDC = await MockERC20("TestUSDC", "USDC", 1000000, { from: dev });
+        this.testUSDC = await MockERC20.new("TestUSDC", "USDC", 1000000, { from: dev });
         await this.testUSDC.transfer(buyer0, 100000, { from: dev });
         await this.testUSDC.transfer(seller0, 900000, { from: dev });
 
-        await this.registry.setBaseToken(this.testUSDC.address, {from: dev});
-        await this.registry.setBonus(this.bonus.address, {from: dev});
+        await this.registry.setAssetManager(this.assetManager.address, { from: dev });
+        await this.registry.setBaseToken(this.testUSDC.address, { from: dev });
+        await this.registry.setBonus(this.bonus.address, { from: dev });
         await this.registry.setBuyer(this.buyer.address, { from: dev });
         await this.registry.setGuarantor(this.guarantor.address, { from: dev });
+        await this.registry.setPremiumCalculator(this.premiumCalculator.address, { from: dev });
         await this.registry.setSeller(this.seller.address, { from: dev });
         await this.registry.setPlatform(dev, { from: dev });
         await this.registry.setTidalToken(this.tidal.address, { from: dev });
 
         // Setup asset 0 (no guarantor).
-        await this.assetManager.setAsset(0, address(0), 0, { from: dev });
+        const zeroAddress = "0x0000000000000000000000000000000000000000";
+        await this.assetManager.setAsset(0, zeroAddress, 0, { from: dev });
         await this.assetManager.resetIndexesByCategory(0, { from: dev });
 
         // Setup premiumCalculator.
-        await this.premiumCalculator(0, 500, { from: dev });  // 0.05% per week.
+        await this.premiumCalculator.setPremiumRate(0, 500, { from: dev });  // 0.05% per week.
 
         // Setup bonus and prepare enough TIDAL.
         await this.bonus.setBonusPerAssetOfS(0, 10000, { from: dev });
         await this.tidal.transfer(this.bonus.address, 50000, { from: dev });
 
         // Setup buyer address.
-        await this.buyer.setBuyerAssetIndexPlusOne(0, buyer0, { from: dev });
+        await this.buyer.setBuyerAssetIndexPlusOne(buyer0, 1, { from: dev });
     });
 
     const updateAssets = async () => {
@@ -68,7 +71,7 @@ contract('Buyer', ([dev, seller0, buyer0]) => {
     }
 
     const updateSeller = async() => {
-        await this.seller.update();
+        await this.seller.update(seller0, { from: dev });
     }
 
     it('should work', async () => {
@@ -76,21 +79,37 @@ contract('Buyer', ([dev, seller0, buyer0]) => {
         await updateBuyer();
 
         // Buyer deposit some balance, and subscribe.
+        await this.testUSDC.approve(this.buyer.address, 100000, { from: buyer0 });
         await this.buyer.deposit(100000, { from: buyer0 });
-        // Paying 5 USDC per week to cover 10000 USDC assets.
-        await this.buyer.subscribe(0, 10000, { from: buyer0 });
+        // Paying 50 USDC per week to cover 100000 USDC assets.
+        await this.buyer.subscribe(0, 100000, { from: buyer0 });
 
         // Seller deposit some balance, and set up basket.
-        await this.seller.deposit(0, 9000, { from: seller0 });  // Only 9000
+        await this.testUSDC.approve(this.seller.address, 80000, { from: seller0 });
+        await this.seller.deposit(0, 80000, { from: seller0 });  // Only 80000
         await this.seller.changeBasket(0, [0], { from: seller0 });
         // Bascket should be changed immediately
 
+        // Move on to a new week.
         await time.increase(time.duration.days(7));
 
         await updateAssets();
         await updateBuyer();
         await updateSeller();
 
-        // Now buyer should have 9995 balance.
+        // Now buyer should have 99950 balance.
+        const buyerInfo0 = await this.buyer.userInfoMap(buyer0, { from: dev });
+        assert.equal(buyerInfo0.balance.valueOf(), 99950);
+
+        // Move on to a new week.
+        await time.increase(time.duration.days(7));
+
+        await updateAssets();
+        await updateBuyer();
+        await updateSeller();
+
+        // Now buyer should have 99910 balance (deducted 50 and refunded 10).
+        const buyerInfo1 = await this.buyer.userInfoMap(buyer0, { from: dev });
+        assert.equal(buyerInfo1.balance.valueOf(), 99910);
     });
 });

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -15,7 +16,7 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
 
 // This contract is not Ownable.
-contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Seller is ISeller, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -115,6 +116,23 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate(uint8 category_) external lock {
+        uint256 balance = userBalance[_msgSender()][category_].futureBalance;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(balance > 0, "No balance");
+
+        userBalance[_msgSender()][category_].currentBalance = 0;
+        userBalance[_msgSender()][category_].futureBalance = 0;
+
+        IERC20(registry.baseToken()).safeTransfer(address(migrateTo), balance);
+        migrateTo.onMigration(_msgSender(), balance, abi.encodePacked(category_));
     }
 
     // Update and pay last week's premium.

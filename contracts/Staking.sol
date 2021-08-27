@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -15,7 +16,7 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Staking is IStaking, Ownable, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeMath for uint256;
 
@@ -106,6 +107,35 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate() external lock {
+        UserInfo storage user = userInfo[_msgSender()];
+
+        uint256 userAmount = user.amount;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(userAmount > 0, "No balance");
+
+        updatePool();
+
+        if (userAmount > 0) {
+            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+                UNIT_PER_SHARE).sub(user.rewardDebt);
+            user.rewardAmount = user.rewardAmount.add(pending);
+        }
+
+        user.amount = 0;
+        poolInfo.amount = poolInfo.amount.sub(userAmount);
+
+        user.rewardDebt = 0;
+
+        IERC20(registry.tidalToken()).transfer(address(migrateTo), userAmount);
+        migrateTo.onMigration(_msgSender(), userAmount, "");
     }
 
     function set(

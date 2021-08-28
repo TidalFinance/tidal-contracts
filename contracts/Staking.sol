@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -15,7 +16,7 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/IStaking.sol";
 
 // This contract is owned by Timelock.
-contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Staking is IStaking, Ownable, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeMath for uint256;
 
@@ -83,9 +84,9 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
     uint256 public lockedAssetCount;
 
     event Deposit(address indexed user_, uint256 amount_);
-    event Withdraw(address indexed user_, uint256 amount_);
-    event WithdrawReady(address indexed user_, uint256 amount_);
-    event WithdrawCancel(address indexed user_, uint256 index_);
+    event Withdraw(address indexed user_, uint256 index_, uint256 amount_);
+    event WithdrawReady(address indexed user_, uint256 index_, uint256 amount_);
+    event WithdrawCancel(address indexed user_, uint256 index_, uint256 amount_);
     event Claim(address indexed user_, uint256 amount_);
     event StartPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_);
     event SetPayout(uint16 indexed assetIndex_, uint256 indexed payoutId_, address toAddress_, uint256 total_);
@@ -102,6 +103,35 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate() external lock {
+        UserInfo storage user = userInfo[_msgSender()];
+
+        uint256 userAmount = user.amount;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(userAmount > 0, "No balance");
+
+        updatePool();
+
+        if (userAmount > 0) {
+            uint256 pending = userAmount.mul(poolInfo.accRewardPerShare).div(
+                UNIT_PER_SHARE).sub(user.rewardDebt);
+            user.rewardAmount = user.rewardAmount.add(pending);
+        }
+
+        user.amount = 0;
+        poolInfo.amount = poolInfo.amount.sub(userAmount);
+
+        user.rewardDebt = 0;
+
+        IERC20(registry.tidalToken()).transfer(address(migrateTo), userAmount);
+        migrateTo.onMigration(_msgSender(), userAmount, "");
     }
 
     function set(
@@ -210,6 +240,8 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         UserInfo storage user = userInfo[_msgSender()];
         require(user.amount >= withdrawAmountMap[_msgSender()].add(amount_), "Not enough amount");
 
+        uint256 index = withdrawRequestMap[_msgSender()].length;
+
         withdrawRequestMap[_msgSender()].push(WithdrawRequest({
             time: getNow(),
             amount: amount_,
@@ -219,7 +251,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         // Updates total withdraw amount in pending.
         withdrawAmountMap[_msgSender()] = withdrawAmountMap[_msgSender()].add(amount_);
 
-        emit Withdraw(_msgSender(), amount_);
+        emit Withdraw(_msgSender(), index, amount_);
     }
 
     function withdrawReady(address who_, uint256 index_) external lock {
@@ -234,7 +266,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
             withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
             request.executed = true;
 
-            emit WithdrawCancel(who_, index_);
+            emit WithdrawCancel(who_, index_, request.amount);
             return;
         }
 
@@ -262,7 +294,7 @@ contract Staking is IStaking, Ownable, WeekManaged, NonReentrancy, BaseRelayReci
         // Updates total withdraw amount in pending.
         withdrawAmountMap[who_] = withdrawAmountMap[who_].sub(request.amount);
 
-        emit WithdrawReady(who_, request.amount);
+        emit WithdrawReady(who_, index_, request.amount);
     }
 
 

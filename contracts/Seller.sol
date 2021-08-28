@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -15,7 +16,7 @@ import "./interfaces/IRegistry.sol";
 import "./interfaces/ISeller.sol";
 
 // This contract is not Ownable.
-contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Seller is ISeller, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -113,6 +114,23 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         return registry.trustedForwarder();
     }
 
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate(uint8 category_) external lock {
+        uint256 balance = userBalance[_msgSender()][category_].futureBalance;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(balance > 0, "No balance");
+
+        userBalance[_msgSender()][category_].currentBalance = 0;
+        userBalance[_msgSender()][category_].futureBalance = 0;
+
+        IERC20(registry.baseToken()).safeTransfer(address(migrateTo), balance);
+        migrateTo.onMigration(_msgSender(), balance, abi.encodePacked(category_));
+    }
+
     // Update and pay last week's premium.
     function updatePremium(uint16 assetIndex_) external lock {
         uint256 week = getCurrentWeek();
@@ -183,8 +201,13 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
 
     function changeBasket(uint8 category_, uint16[] calldata basketIndexes_) external {
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
-        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
         require(!isBasketLocked(basketIndexes_), "Is basket locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
+        require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         if (userBalance[_msgSender()][category_].currentBalance == 0) {
             // Change now.
@@ -252,7 +275,7 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
     }
 
     // Called for every user every week.
-    function update(address who_) external override {
+    function update(address who_) public override {
         // Update user's last week's premium and bonus.
         uint256 week = getCurrentWeek();
 
@@ -277,17 +300,19 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
             uint256 currentBalance = userBalance[who_][category].currentBalance;
             uint256 futureBalance = userBalance[who_][category].futureBalance;
 
-            // Update premium.
-            userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
-                poolInfo[index].premiumPerShare).div(registry.UNIT_PER_SHARE()));
-
-            // Update bonus.
-            userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
-                poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
-
             // Update asset balance if no claims.
-            if (!isCategoryLocked(who_, category) && userBasket[who_][index]) {
-                assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
+            if (userBasket[who_][index]) {
+                // Update bonus.
+                userInfo[who_].bonus = userInfo[who_].bonus.add(currentBalance.mul(
+                    poolInfo[index].bonusPerShare).div(registry.UNIT_PER_SHARE()));
+
+                if (!isCategoryLocked(who_, category)) {
+                    // Update premium.
+                    userInfo[who_].premium = userInfo[who_].premium.add(currentBalance.mul(
+                        poolInfo[index].premiumPerShare).div(registry.UNIT_PER_SHARE()));
+
+                    assetBalance[index] = assetBalance[index].add(futureBalance).sub(currentBalance);
+                }
             }
         }
 
@@ -311,9 +336,18 @@ contract Seller is ISeller, WeekManaged, NonReentrancy, BaseRelayRecipient {
         emit Update(who_);
     }
 
+    function isFirstTime(address who_) public view returns(bool) {
+        return userInfo[who_].week == 0;
+    }
+
     function deposit(uint8 category_, uint256 amount_) external lock {
         require(!registry.depositPaused(), "Deposit paused");
         require(!isCategoryLocked(_msgSender(), category_), "Asset locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -14,9 +15,8 @@ import "./interfaces/IBuyer.sol";
 import "./interfaces/IGuarantor.sol";
 import "./interfaces/IRegistry.sol";
 
-
 // This contract is not Ownable.
-contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Guarantor is IGuarantor, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -99,6 +99,25 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         return registry.trustedForwarder();
     }
 
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate(uint16 assetIndex_) external lock {
+        uint256 balance = userBalance[_msgSender()][assetIndex_].futureBalance;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(balance > 0, "No balance");
+
+        userBalance[_msgSender()][assetIndex_].currentBalance = 0;
+        userBalance[_msgSender()][assetIndex_].futureBalance = 0;
+
+        address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);
+
+        IERC20(token).safeTransfer(address(migrateTo), balance);
+        migrateTo.onMigration(_msgSender(), balance, abi.encodePacked(assetIndex_));
+    }
+
     // Update and pay last week's premium.
     function updatePremium(uint16 assetIndex_) external lock {
         uint256 week = getCurrentWeek();
@@ -140,7 +159,7 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
     }
 
     // Called for every user every week.
-    function update(address who_) external override {
+    function update(address who_) public override {
         uint256 week = getCurrentWeek();
 
         require(userInfo[who_].week < week, "Already updated");
@@ -178,6 +197,10 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
         emit Update(who_);
     }
 
+    function isFirstTime(address who_) public view returns(bool) {
+        return userInfo[who_].week == 0;
+    }
+
     function isAssetLocked(uint16 assetIndex_) public view returns(bool) {
         uint256 payoutId = payoutIdMap[assetIndex_];
         return payoutId > 0 && !payoutInfo[assetIndex_][payoutId].finished;
@@ -185,6 +208,11 @@ contract Guarantor is IGuarantor, WeekManaged, NonReentrancy, BaseRelayRecipient
 
     function deposit(uint16 assetIndex_, uint256 amount_) external lock {
         require(!isAssetLocked(assetIndex_), "Is asset locked");
+
+        if (isFirstTime(_msgSender())) {
+            update(_msgSender());
+        }
+
         require(userInfo[_msgSender()].week == getCurrentWeek(), "Not updated yet");
 
         address token = IAssetManager(registry.assetManager()).getAssetToken(assetIndex_);

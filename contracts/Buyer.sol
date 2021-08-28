@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "./common/BaseRelayRecipient.sol";
+import "./common/Migratable.sol";
 import "./common/NonReentrancy.sol";
 import "./common/WeekManaged.sol";
 
@@ -19,7 +20,7 @@ import "./interfaces/ISeller.sol";
 
 
 // This contract is owned by Timelock.
-contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipient {
+contract Buyer is IBuyer, Ownable, WeekManaged, Migratable, NonReentrancy, BaseRelayRecipient {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -77,6 +78,22 @@ contract Buyer is IBuyer, Ownable, WeekManaged, NonReentrancy, BaseRelayRecipien
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function _migrationCaller() internal override view returns(address) {
+        return address(registry);
+    }
+
+    function migrate() external lock {
+        uint256 balance = userInfoMap[_msgSender()].balance;
+
+        require(address(migrateTo) != address(0), "Destination not set");
+        require(balance > 0, "No balance");
+
+        userInfoMap[_msgSender()].balance = 0;
+
+        IERC20(registry.baseToken()).safeTransfer(address(migrateTo), balance);
+        migrateTo.onMigration(_msgSender(), balance, "");
     }
 
     // Set buyer asset index. When 0, it's cleared.

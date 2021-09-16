@@ -44,7 +44,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     // assetIndex => who => UserInfo
     mapping(uint16 => mapping(address => UserInfo)) public userInfo;
 
-    event AddBalance(address indexed user_, uint16 assetIndex_, uint256 amount_);
+    event AddBonus(address indexed user_, uint16 assetIndex_, uint256 amount_);
     event Update(address indexed user_, uint16 assetIndex_);
     event Claim(address indexed user_, uint256 amount_);
 
@@ -64,8 +64,8 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         poolInfo[assetIndex_].token = token_;
     }
 
-    // Adds balance --> Step 2.
-    function addBalance(uint16 assetIndex_, uint256 amount_) external lock {
+    // Adds bonus --> Step 2.
+    function addBonus(uint16 assetIndex_, uint256 amount_) external lock {
         PoolInfo storage pool = poolInfo[assetIndex_];
 
         require(pool.token != address(0), "Token not set");
@@ -74,7 +74,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         pool.accRewardPerShare = pool.accRewardPerShare.add(
             amount_.mul(registry.UNIT_PER_SHARE()).div(pool.amount));
 
-        emit AddBalance(_msgSender(), assetIndex_, amount_);
+        emit AddBonus(_msgSender(), assetIndex_, amount_);
     }
 
     function getUserSellerBalance(address who_, uint16 assetIndex_) public view returns(uint256) {
@@ -87,10 +87,16 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         return currentBalance;
     }
 
+    function massUpdate(address who_, uint16[] memory assetIndexArray_) external {
+        for (uint256 i = 0; i < assetIndexArray_.length; ++i) {
+            update(who_, assetIndexArray_[i]);
+        }
+    }
+
     // Every week update. ---> Step 1.
-    function update(address who_, uint16 assetIndex_) external {
+    function update(address who_, uint16 assetIndex_) public {
         PoolInfo storage pool = poolInfo[assetIndex_];
-        UserInfo storage user = userInfo[assetIndex_][_msgSender()];
+        UserInfo storage user = userInfo[assetIndex_][who_];
 
         if (user.amount > 0) {
             uint256 pending = user.amount.mul(pool.accRewardPerShare).div(
@@ -105,7 +111,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
         user.rewardDebt = user.amount.mul(pool.accRewardPerShare).div(registry.UNIT_PER_SHARE());
 
-        emit Update(_msgSender(), assetIndex_);
+        emit Update(who_, assetIndex_);
     }
 
     // Claim. ---> Step 3.

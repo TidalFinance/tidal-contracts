@@ -44,6 +44,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     // assetIndex => who => UserInfo
     mapping(uint16 => mapping(address => UserInfo)) public userInfo;
 
+    event SetToken(uint16 assetIndex_, address token_);
     event AddBonus(address indexed user_, uint16 assetIndex_, uint256 amount_);
     event Update(address indexed user_, uint16 assetIndex_);
     event Claim(address indexed user_, uint256 amount_);
@@ -60,8 +61,9 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         return registry.trustedForwarder();
     }
 
-    function set(uint16 assetIndex_, address token_) external onlyOwner {
+    function setToken(uint16 assetIndex_, address token_) external onlyOwner {
         poolInfo[assetIndex_].token = token_;
+        emit SetToken(assetIndex_, token_);
     }
 
     // Adds bonus --> Step 2.
@@ -69,6 +71,8 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         PoolInfo storage pool = poolInfo[assetIndex_];
 
         require(pool.token != address(0), "Token not set");
+        require(pool.amount > 0, "Pool amount non-zero");
+
         IERC20(pool.token).safeTransferFrom(_msgSender(), address(this), amount_);
 
         pool.accRewardPerShare = pool.accRewardPerShare.add(

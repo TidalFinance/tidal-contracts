@@ -22,6 +22,8 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
+    address constant NATIVE_PLACEHOLDER = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     string public override versionRecipient = "1.0.0";
 
     IRegistry public registry;
@@ -73,12 +75,26 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         require(pool.token != address(0), "Token not set");
         require(pool.amount > 0, "Pool amount non-zero");
 
-        IERC20(pool.token).safeTransferFrom(_msgSender(), address(this), amount_);
+        IERC20(pool.token).safeTransferFrom(msg.sender, address(this), amount_);
 
         pool.accRewardPerShare = pool.accRewardPerShare.add(
             amount_.mul(registry.UNIT_PER_SHARE()).div(pool.amount));
 
-        emit AddBonus(_msgSender(), assetIndex_, amount_);
+        emit AddBonus(msg.sender, assetIndex_, amount_);
+    }
+
+    // Adds bonus --> Step 2.
+    function addBonusNative(uint16 assetIndex_, uint256 amount_) external payable lock {
+        PoolInfo storage pool = poolInfo[assetIndex_];
+
+        require(pool.token == NATIVE_PLACEHOLDER, "Token not native");
+        require(pool.amount > 0, "Pool amount non-zero");
+        require(msg.value == amount_, "Amount not sent");
+
+        pool.accRewardPerShare = pool.accRewardPerShare.add(
+            amount_.mul(registry.UNIT_PER_SHARE()).div(pool.amount));
+
+        emit AddBonus(msg.sender, assetIndex_, amount_);
     }
 
     function getUserSellerBalance(address who_, uint16 assetIndex_) public view returns(uint256) {
@@ -123,7 +139,11 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         PoolInfo storage pool = poolInfo[assetIndex_];
         UserInfo storage user = userInfo[assetIndex_][_msgSender()];
 
-        IERC20(pool.token).safeTransfer(_msgSender(), user.rewardAmount);
+        if (pool.token == NATIVE_PLACEHOLDER) {
+          _msgSender().transfer(user.rewardAmount);
+        } else {
+          IERC20(pool.token).safeTransfer(_msgSender(), user.rewardAmount);
+        }
 
         emit Claim(_msgSender(), user.rewardAmount);
         user.rewardAmount = 0;

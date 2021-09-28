@@ -29,13 +29,14 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     IRegistry public registry;
 
     struct PoolInfo {
-        address token;
+        uint16 assetIndex;
+        address token;  // token as bonus.
         uint256 amount;
         uint256 accRewardPerShare;
     }
 
-    // assetIndex => PoolInfo
-    mapping(uint16 => PoolInfo) public poolInfo;
+    // pid => PoolInfo
+    PoolInfo[] public poolInfo;
 
     struct UserInfo {
         uint256 amount;
@@ -43,13 +44,13 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         uint256 rewardDebt; // Reward debt.
     }
 
-    // assetIndex => who => UserInfo
-    mapping(uint16 => mapping(address => UserInfo)) public userInfo;
+    // pid => who => UserInfo
+    mapping(uint256 => mapping(address => UserInfo)) public userInfo;
 
-    event SetToken(uint16 assetIndex_, address token_);
-    event AddBonus(address indexed user_, uint16 assetIndex_, uint256 amount_);
-    event Update(address indexed user_, uint16 assetIndex_);
-    event Claim(address indexed user_, uint256 amount_);
+    event AddPool(uint256 pid_, uint16 assetIndex, address token_);
+    event AddBonus(address indexed user_, uint256 pid_, uint256 amount_);
+    event Update(address indexed user_, uint256 pid_);
+    event Claim(address indexed user_, uint256 pid_, uint256 amount_);
 
     constructor (IRegistry registry_) public {
         registry = registry_;
@@ -63,14 +64,17 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         return registry.trustedForwarder();
     }
 
-    function setToken(uint16 assetIndex_, address token_) external onlyOwner {
-        poolInfo[assetIndex_].token = token_;
-        emit SetToken(assetIndex_, token_);
+    function addPool(uint16 assetIndex_, address token_) external onlyOwner {
+        PoolInfo memory info;
+        info.assetIndex = assetIndex_;
+        info.token = token_;
+        poolInfo.push(info);
+        emit AddPool(poolInfo.length - 1, assetIndex_, token_);
     }
 
     // Adds bonus --> Step 2.
-    function addBonus(uint16 assetIndex_, uint256 amount_) external lock {
-        PoolInfo storage pool = poolInfo[assetIndex_];
+    function addBonus(uint256 pid_, uint256 amount_) external lock {
+        PoolInfo storage pool = poolInfo[pid_];
 
         require(pool.token != address(0), "Token not set");
         require(pool.amount > 0, "Pool amount non-zero");
@@ -80,12 +84,12 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         pool.accRewardPerShare = pool.accRewardPerShare.add(
             amount_.mul(registry.UNIT_PER_SHARE()).div(pool.amount));
 
-        emit AddBonus(msg.sender, assetIndex_, amount_);
+        emit AddBonus(msg.sender, pid_, amount_);
     }
 
     // Adds bonus --> Step 2.
-    function addBonusNative(uint16 assetIndex_, uint256 amount_) external payable lock {
-        PoolInfo storage pool = poolInfo[assetIndex_];
+    function addBonusNative(uint256 pid_, uint256 amount_) external payable lock {
+        PoolInfo storage pool = poolInfo[pid_];
 
         require(pool.token == NATIVE_PLACEHOLDER, "Token not native");
         require(pool.amount > 0, "Pool amount non-zero");
@@ -94,29 +98,31 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         pool.accRewardPerShare = pool.accRewardPerShare.add(
             amount_.mul(registry.UNIT_PER_SHARE()).div(pool.amount));
 
-        emit AddBonus(msg.sender, assetIndex_, amount_);
+        emit AddBonus(msg.sender, pid_, amount_);
     }
 
-    function getUserSellerBalance(address who_, uint16 assetIndex_) public view returns(uint256) {
-        if (!ISeller(registry.seller()).userBasket(who_, assetIndex_)) {
+    function getUserSellerBalance(address who_, uint256 pid_) public view returns(uint256) {
+        PoolInfo storage pool = poolInfo[pid_];
+
+        if (!ISeller(registry.seller()).userBasket(who_, pool.assetIndex)) {
             return 0;
         }
 
         (uint256 currentBalance, ) = ISeller(registry.seller()).userBalance(
-            who_, IAssetManager(registry.assetManager()).getAssetCategory(assetIndex_));
+            who_, IAssetManager(registry.assetManager()).getAssetCategory(pool.assetIndex));
         return currentBalance;
     }
 
-    function massUpdate(address who_, uint16[] memory assetIndexArray_) external {
-        for (uint256 i = 0; i < assetIndexArray_.length; ++i) {
-            update(who_, assetIndexArray_[i]);
+    function massUpdate(address who_, uint256[] memory pidArray_) external {
+        for (uint256 i = 0; i < pidArray_.length; ++i) {
+            update(who_, pidArray_[i]);
         }
     }
 
     // Every week update. ---> Step 1.
-    function update(address who_, uint16 assetIndex_) public {
-        PoolInfo storage pool = poolInfo[assetIndex_];
-        UserInfo storage user = userInfo[assetIndex_][who_];
+    function update(address who_, uint256 pid_) public {
+        PoolInfo storage pool = poolInfo[pid_];
+        UserInfo storage user = userInfo[pid_][who_];
 
         if (user.amount > 0) {
             uint256 pending = user.amount.mul(pool.accRewardPerShare).div(
@@ -125,19 +131,19 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
             user.rewardAmount = user.rewardAmount.add(pending);
         }
 
-        uint256 updatedBalance = getUserSellerBalance(who_, assetIndex_);
+        uint256 updatedBalance = getUserSellerBalance(who_, pid_);
         pool.amount = pool.amount.add(updatedBalance).sub(user.amount);
         user.amount = updatedBalance;
 
         user.rewardDebt = user.amount.mul(pool.accRewardPerShare).div(registry.UNIT_PER_SHARE());
 
-        emit Update(who_, assetIndex_);
+        emit Update(who_, pid_);
     }
 
     // Claim. ---> Step 3.
-    function claim(uint16 assetIndex_) external lock {
-        PoolInfo storage pool = poolInfo[assetIndex_];
-        UserInfo storage user = userInfo[assetIndex_][_msgSender()];
+    function claim(uint256 pid_) external lock {
+        PoolInfo storage pool = poolInfo[pid_];
+        UserInfo storage user = userInfo[pid_][_msgSender()];
 
         if (pool.token == NATIVE_PLACEHOLDER) {
           _msgSender().transfer(user.rewardAmount);
@@ -145,7 +151,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
           IERC20(pool.token).safeTransfer(_msgSender(), user.rewardAmount);
         }
 
-        emit Claim(_msgSender(), user.rewardAmount);
+        emit Claim(_msgSender(), pid_, user.rewardAmount);
         user.rewardAmount = 0;
     }
 }

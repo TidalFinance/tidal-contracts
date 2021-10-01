@@ -146,7 +146,8 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         UserInfo storage user = userInfo[pid_][_msgSender()];
 
         if (pool.token == NATIVE_PLACEHOLDER) {
-          _msgSender().transfer(user.rewardAmount);
+          (bool success, ) = _msgSender().call.value(user.rewardAmount)("");
+          require(success, "Transfer failed.");
         } else {
           IERC20(pool.token).safeTransfer(_msgSender(), user.rewardAmount);
         }

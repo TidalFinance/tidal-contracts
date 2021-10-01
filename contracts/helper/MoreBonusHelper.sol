@@ -76,6 +76,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     function addBonus(uint256 pid_, uint256 amount_) external lock {
         PoolInfo storage pool = poolInfo[pid_];
 
+        require(amount_ > 0, "Amount must be non-zero");
         require(pool.token != address(0), "Token not set");
         require(pool.amount > 0, "Pool amount non-zero");
 
@@ -91,6 +92,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     function addBonusNative(uint256 pid_, uint256 amount_) external payable lock {
         PoolInfo storage pool = poolInfo[pid_];
 
+        require(amount_ > 0, "Amount must be non-zero");
         require(pool.token == NATIVE_PLACEHOLDER, "Token not native");
         require(pool.amount > 0, "Pool amount non-zero");
         require(msg.value == amount_, "Amount not sent");

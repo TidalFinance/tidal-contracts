@@ -65,6 +65,7 @@ contract MoreBonusHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function addPool(uint16 assetIndex_, address token_) external onlyOwner {
+        require(token_ != address(0), "Token address must be non-zero");
         PoolInfo memory info;
         info.assetIndex = assetIndex_;
         info.token = token_;

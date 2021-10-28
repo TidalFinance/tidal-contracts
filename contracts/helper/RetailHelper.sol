@@ -30,6 +30,13 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     IRegistry public registry;
     IRetailPremiumCalculator public retailPremiumCalculator;
 
+    mapping(address => bool) public priceUpdaterMap;
+
+    modifier onlyPriceUpdater() {
+        require(priceUpdaterMap[msg.sender], "The caller does not have issuer role privileges");
+        _;
+    }
+
     struct UserInfo {
         uint256 balanceBase;
         uint256 balanceAsset;
@@ -48,10 +55,12 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         // allow them to use ResellHelper.
         address token;
         address recipient;
-        uint256 premiumRate;
-        uint256 capacityOffset;
 
+        uint256 futureCapacityOffset;
+        uint256 futureTokenPrice;
+        uint256 capacityOffset;
         uint256 tokenPrice;
+
         uint256 subscriptionBase;
         uint256 subscriptionAsset;  // subscriptionAsset * tokenPrice / PRICE_BASE
         uint256 refundRatio;
@@ -96,6 +105,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         return registry.trustedForwarder();
     }
 
+    function setPriceUpdater(address _who, bool _isPriceUpdater) external onlyOwner {
+        priceUpdaterMap[_who] = _isPriceUpdater;
+    }
+
     function setRetailPremiumCalculator(IRetailPremiumCalculator retailPremiumCalculator_) external onlyOwner {
         retailPremiumCalculator = retailPremiumCalculator_;
     }
@@ -104,22 +117,11 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         uint16 assetIndex_,
         address token_,
         address recipient_,
-        uint256 premiumRate_,
         uint256 capacityOffset_
     ) external onlyOwner {
         assetInfoMap[assetIndex_].token = token_;
         assetInfoMap[assetIndex_].recipient = recipient_;
-        assetInfoMap[assetIndex_].premiumRate = premiumRate_;
         assetInfoMap[assetIndex_].capacityOffset = capacityOffset_;
-    }
-
-    function changePremiumRate(
-        uint16 assetIndex_,
-        uint256 premiumRate_
-    ) external {
-        require(_msgSender() == assetInfoMap[assetIndex_].recipient,
-                "Only recipient can change");
-        assetInfoMap[assetIndex_].premiumRate = premiumRate_;
     }
 
     function changeCapacityOffset(
@@ -128,14 +130,14 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     ) external {
         require(_msgSender() == assetInfoMap[assetIndex_].recipient, 
                 "Only recipient can change");
-        assetInfoMap[assetIndex_].capacityOffset = capacityOffset_;
+        assetInfoMap[assetIndex_].futureCapacityOffset = capacityOffset_;
     }
 
     function changeTokenPrice(
         uint16 assetIndex_,
         uint256 tokenPrice_
-    ) external onlyOwner {
-        assetInfoMap[assetIndex_].tokenPrice = tokenPrice_;
+    ) external onlyPriceUpdater {
+        assetInfoMap[assetIndex_].futureTokenPrice = tokenPrice_;
     }
 
     function getCurrentWeek() public view returns(uint256) {
@@ -153,6 +155,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
 
         require(assetInfo.weekUpdated < currentWeek, "Already called");
+
+        // Uses future configurations.
+        assetInfo.capacityOffset = assetInfo.futureCapacityOffset;
+        assetInfo.tokenPrice = assetInfo.futureTokenPrice;
 
         uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
 

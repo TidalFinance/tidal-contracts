@@ -199,7 +199,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
             uint256 refundAsset = userInfo.premiumAsset.mul(assetInfo.refundRatio).div(REFUND_BASE);
             userInfo.balanceAsset = userInfo.balanceAsset.add(refundAsset);
-            IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumBase.sub(refundBase));
+            IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumAsset.sub(refundAsset));
             emit RefundAsset(who_, assetIndex_, refundAsset);
         }
 

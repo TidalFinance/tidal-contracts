@@ -190,13 +190,16 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         require(userInfo.weekUpdated < currentWeek, "Already called");
 
         // Maybe refund to user.
+        // NOTE: We pay recipient for the last week's premium at this week after refunding.
         if (assetInfo.refundRatio > 0) {
             uint256 refundBase = userInfo.premiumBase.mul(assetInfo.refundRatio).div(REFUND_BASE);
             userInfo.balanceBase = userInfo.balanceBase.add(refundBase);
+            IERC20(registry.baseToken()).safeTransfer(assetInfo.recipient, userInfo.premiumBase.sub(refundBase));
             emit RefundBase(who_, assetIndex_, refundBase);
 
             uint256 refundAsset = userInfo.premiumAsset.mul(assetInfo.refundRatio).div(REFUND_BASE);
             userInfo.balanceAsset = userInfo.balanceAsset.add(refundAsset);
+            IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumBase.sub(refundBase));
             emit RefundAsset(who_, assetIndex_, refundAsset);
         }
 

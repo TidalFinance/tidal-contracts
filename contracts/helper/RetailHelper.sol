@@ -119,6 +119,9 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         address recipient_,
         uint256 capacityOffset_
     ) external onlyOwner {
+        require(recipient_ != address(0), "recipient_ is zero");
+        // token_ can be zero, and capacityOffset_ can be zero too.
+
         assetInfoMap[assetIndex_].token = token_;
         assetInfoMap[assetIndex_].recipient = recipient_;
         assetInfoMap[assetIndex_].capacityOffset = capacityOffset_;
@@ -197,10 +200,12 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
             IERC20(registry.baseToken()).safeTransfer(assetInfo.recipient, userInfo.premiumBase.sub(refundBase));
             emit RefundBase(who_, assetIndex_, refundBase);
 
-            uint256 refundAsset = userInfo.premiumAsset.mul(assetInfo.refundRatio).div(REFUND_BASE);
-            userInfo.balanceAsset = userInfo.balanceAsset.add(refundAsset);
-            IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumAsset.sub(refundAsset));
-            emit RefundAsset(who_, assetIndex_, refundAsset);
+            if (assetInfo.token != address(0)) {
+                uint256 refundAsset = userInfo.premiumAsset.mul(assetInfo.refundRatio).div(REFUND_BASE);
+                userInfo.balanceAsset = userInfo.balanceAsset.add(refundAsset);
+                IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumAsset.sub(refundAsset));
+                emit RefundAsset(who_, assetIndex_, refundAsset);
+            }
         }
 
         // Maybe deduct premium as base.
@@ -220,25 +225,29 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         }
 
         // Maybe deduct premium as asset.
-        uint256 premiumAsset = subscription.futureAsset.mul(
+        if (assetInfo.token != address(0)) {
+            uint256 premiumAsset = subscription.futureAsset.mul(
                 getPremiumRate(assetIndex_, who_)).div(registry.PREMIUM_BASE()).mul(PRICE_BASE).div(assetInfo.tokenPrice);
-        if (userInfo.balanceAsset >= premiumAsset) {
-            userInfo.balanceAsset = userInfo.balanceAsset.sub(premiumAsset);
-            userInfo.premiumAsset = premiumAsset;
-            subscription.currentAsset = subscription.futureAsset;
-            assetInfo.subscriptionAsset = assetInfo.subscriptionAsset.add(subscription.currentAsset);
+            if (userInfo.balanceAsset >= premiumAsset) {
+                userInfo.balanceAsset = userInfo.balanceAsset.sub(premiumAsset);
+                userInfo.premiumAsset = premiumAsset;
+                subscription.currentAsset = subscription.futureAsset;
+                assetInfo.subscriptionAsset = assetInfo.subscriptionAsset.add(subscription.currentAsset);
 
-            emit DeductAsset(who_, assetIndex_, subscription.currentAsset, premiumAsset);
-        } else {
-            userInfo.premiumAsset = 0;
-            subscription.currentAsset = 0;
-            subscription.futureAsset = 0;
+                emit DeductAsset(who_, assetIndex_, subscription.currentAsset, premiumAsset);
+            } else {
+                userInfo.premiumAsset = 0;
+                subscription.currentAsset = 0;
+                subscription.futureAsset = 0;
+            }
         }
 
         userInfo.weekUpdated = currentWeek;  // This week.
     }
 
     function depositBase(uint16 assetIndex_, uint256 amount_) external lock {
+        require(amount_ > 0, "amount_ is zero");
+
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
         userInfoMap[assetIndex_][_msgSender()].balanceBase = userInfoMap[assetIndex_][_msgSender()].balanceBase.add(amount_);
 
@@ -246,6 +255,9 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function depositAsset(uint16 assetIndex_, uint256 amount_) external lock {
+        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        require(amount_ > 0, "amount_ is zero");
+
         IERC20(assetInfoMap[assetIndex_].token).safeTransferFrom(
             _msgSender(), address(this), amount_);
         userInfoMap[assetIndex_][_msgSender()].balanceAsset =
@@ -255,7 +267,9 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function withdrawBase(uint16 assetIndex_, uint256 amount_) external lock {
+        require(amount_ > 0, "amount_ is zero");
         require(userInfoMap[assetIndex_][_msgSender()].balanceBase >= amount_, "not enough balance");
+
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
         userInfoMap[assetIndex_][_msgSender()].balanceBase = userInfoMap[assetIndex_][_msgSender()].balanceBase.sub(amount_);
 
@@ -263,7 +277,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function withdrawAsset(uint16 assetIndex_, uint256 amount_) external lock {
+        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        require(amount_ > 0, "amount_ is zero");
         require(userInfoMap[assetIndex_][_msgSender()].balanceAsset >= amount_, "not enough balance");
+
         IERC20(assetInfoMap[assetIndex_].token).safeTransfer(_msgSender(), amount_);
         userInfoMap[assetIndex_][_msgSender()].balanceAsset = userInfoMap[assetIndex_][_msgSender()].balanceAsset.sub(amount_);
 
@@ -271,24 +288,34 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function subscribeBase(uint16 assetIndex_, uint256 amount_) external {
+        require(amount_ > 0, "amount_ is zero");
+
         subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.add(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.add(amount_);
         emit SubscribeBase(_msgSender(), assetIndex_, amount_);
     }
 
     function unsubscribeBase(uint16 assetIndex_, uint256 amount_) external {
+        require(amount_ > 0, "amount_ is zero");
+
         subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.sub(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.sub(amount_);
         emit UnsubscribeBase(_msgSender(), assetIndex_, amount_);
     }
 
     function subscribeAsset(uint16 assetIndex_, uint256 amount_) external {
+        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        require(amount_ > 0, "amount_ is zero");
+
         subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.add(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.add(amount_);
         emit SubscribeAsset(_msgSender(), assetIndex_, amount_);
     }
 
     function unsubscribeAsset(uint16 assetIndex_, uint256 amount_) external {
+        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        require(amount_ > 0, "amount_ is zero");
+
         subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.sub(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.sub(amount_);
         emit UnsubscribeAsset(_msgSender(), assetIndex_, amount_);

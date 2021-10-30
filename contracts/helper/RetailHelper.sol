@@ -30,10 +30,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     IRegistry public registry;
     IRetailPremiumCalculator public retailPremiumCalculator;
 
-    mapping(address => bool) public priceUpdaterMap;
+    mapping(address => bool) public updaterMap;
 
-    modifier onlyPriceUpdater() {
-        require(priceUpdaterMap[msg.sender], "The caller does not have issuer role privileges");
+    modifier onlyUpdater() {
+        require(updaterMap[msg.sender], "The caller does not have updater role privileges");
         _;
     }
 
@@ -105,8 +105,8 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         return registry.trustedForwarder();
     }
 
-    function setPriceUpdater(address _who, bool _isPriceUpdater) external onlyOwner {
-        priceUpdaterMap[_who] = _isPriceUpdater;
+    function setUpdater(address _who, bool _isUpdater) external onlyOwner {
+        updaterMap[_who] = _isUpdater;
     }
 
     function setRetailPremiumCalculator(IRetailPremiumCalculator retailPremiumCalculator_) external onlyOwner {
@@ -136,7 +136,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     function changeTokenPrice(
         uint16 assetIndex_,
         uint256 tokenPrice_
-    ) external onlyPriceUpdater {
+    ) external onlyUpdater {
         assetInfoMap[assetIndex_].futureTokenPrice = tokenPrice_;
     }
 
@@ -149,7 +149,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     // Step 1.
-    function updateAsset(uint16 assetIndex_) external lock {
+    function updateAsset(uint16 assetIndex_) external lock onlyUpdater {
         uint256 currentWeek = getCurrentWeek();
 
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
@@ -179,7 +179,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     // Step 2.
-    function updateUser(uint16 assetIndex_, address who_) external lock {
+    function updateUser(uint16 assetIndex_, address who_) external lock onlyUpdater {
         uint256 currentWeek = getCurrentWeek();
 
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];

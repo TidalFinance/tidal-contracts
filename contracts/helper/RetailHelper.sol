@@ -157,6 +157,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
 
+        require(assetInfo.recipient != address(0), "Recipient is zero");
         require(assetInfo.weekUpdated < currentWeek, "Already called");
 
         // Uses future configurations.
@@ -183,13 +184,16 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
     // Step 2.
     function updateUser(uint16 assetIndex_, address who_) external lock onlyUpdater {
+        require(who_ != address(0), "who_ is zero");
+
         uint256 currentWeek = getCurrentWeek();
 
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
         UserInfo storage userInfo = userInfoMap[assetIndex_][who_];
         Subscription storage subscription = subscriptionByUser[assetIndex_][who_];
 
-        require(assetInfoMap[assetIndex_].weekUpdated == currentWeek, "updateAsset first");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
+        require(assetInfo.weekUpdated == currentWeek, "updateAsset first");
         require(userInfo.weekUpdated < currentWeek, "Already called");
 
         // Maybe refund to user.
@@ -246,49 +250,67 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function depositBase(uint16 assetIndex_, uint256 amount_) external lock {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        UserInfo storage userInfo = userInfoMap[assetIndex_][_msgSender()];
+
         require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
-        userInfoMap[assetIndex_][_msgSender()].balanceBase = userInfoMap[assetIndex_][_msgSender()].balanceBase.add(amount_);
+        userInfo.balanceBase = userInfo.balanceBase.add(amount_);
 
         emit DepositBase(_msgSender(), assetIndex_, amount_);
     }
 
     function depositAsset(uint16 assetIndex_, uint256 amount_) external lock {
-        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
-        require(amount_ > 0, "amount_ is zero");
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        UserInfo storage userInfo = userInfoMap[assetIndex_][_msgSender()];
 
-        IERC20(assetInfoMap[assetIndex_].token).safeTransferFrom(
+        require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.token != address(0), "token is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
+
+        IERC20(assetInfo.token).safeTransferFrom(
             _msgSender(), address(this), amount_);
-        userInfoMap[assetIndex_][_msgSender()].balanceAsset =
-            userInfoMap[assetIndex_][_msgSender()].balanceAsset.add(amount_);
+        userInfo.balanceAsset = userInfo.balanceAsset.add(amount_);
 
         emit DepositAsset(_msgSender(), assetIndex_, amount_);
     }
 
     function withdrawBase(uint16 assetIndex_, uint256 amount_) external lock {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        UserInfo storage userInfo = userInfoMap[assetIndex_][_msgSender()];
+
         require(amount_ > 0, "amount_ is zero");
-        require(userInfoMap[assetIndex_][_msgSender()].balanceBase >= amount_, "not enough balance");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
+        require(userInfo.balanceBase >= amount_, "not enough balance");
 
         IERC20(registry.baseToken()).safeTransfer(_msgSender(), amount_);
-        userInfoMap[assetIndex_][_msgSender()].balanceBase = userInfoMap[assetIndex_][_msgSender()].balanceBase.sub(amount_);
+        userInfo.balanceBase = userInfo.balanceBase.sub(amount_);
 
         emit WithdrawBase(_msgSender(), assetIndex_, amount_);
     }
 
     function withdrawAsset(uint16 assetIndex_, uint256 amount_) external lock {
-        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
-        require(amount_ > 0, "amount_ is zero");
-        require(userInfoMap[assetIndex_][_msgSender()].balanceAsset >= amount_, "not enough balance");
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        UserInfo storage userInfo = userInfoMap[assetIndex_][_msgSender()];
 
-        IERC20(assetInfoMap[assetIndex_].token).safeTransfer(_msgSender(), amount_);
-        userInfoMap[assetIndex_][_msgSender()].balanceAsset = userInfoMap[assetIndex_][_msgSender()].balanceAsset.sub(amount_);
+        require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.token != address(0), "token is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
+        require(userInfo.balanceAsset >= amount_, "not enough balance");
+
+        IERC20(assetInfo.token).safeTransfer(_msgSender(), amount_);
+        userInfo.balanceAsset = userInfo.balanceAsset.sub(amount_);
 
         emit WithdrawAsset(_msgSender(), assetIndex_, amount_);
     }
 
     function subscribeBase(uint16 assetIndex_, uint256 amount_) external {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+
         require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
 
         subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.add(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.add(amount_);
@@ -296,7 +318,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function unsubscribeBase(uint16 assetIndex_, uint256 amount_) external {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+
         require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
 
         subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.sub(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.sub(amount_);
@@ -304,8 +329,11 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function subscribeAsset(uint16 assetIndex_, uint256 amount_) external {
-        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+
         require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.token != address(0), "token is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
 
         subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.add(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.add(amount_);
@@ -313,8 +341,11 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function unsubscribeAsset(uint16 assetIndex_, uint256 amount_) external {
-        require(assetInfoMap[assetIndex_].token != address(0), "token is zero");
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+
         require(amount_ > 0, "amount_ is zero");
+        require(assetInfo.token != address(0), "token is zero");
+        require(assetInfo.recipient != address(0), "Recipient is zero");
 
         subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.sub(amount_);
         subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.sub(amount_);

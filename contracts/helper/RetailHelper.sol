@@ -25,7 +25,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     string public override versionRecipient = "1.0.0";
 
     uint256 public constant PRICE_BASE = 1e18;
-    uint256 public constant REFUND_BASE = 1e18;
+    uint256 public constant RATIO_BASE = 1e18;
 
     IRegistry public registry;
     IRetailPremiumCalculator public retailPremiumCalculator;
@@ -61,9 +61,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         uint256 capacityOffset;
         uint256 tokenPrice;
 
-        uint256 subscriptionBase;
-        uint256 subscriptionAsset;  // subscriptionAsset * tokenPrice / PRICE_BASE
-        uint256 refundRatio;
+        uint256 subscriptionRatio;
 
         uint256 weekUpdated;  // The week that AssetInfo was updated
     }
@@ -71,21 +69,19 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     mapping(uint16 => AssetInfo) public assetInfoMap;
 
     struct Subscription {
-        uint256 currentBase;
         uint256 futureBase;
-        uint256 currentAsset;
         uint256 futureAsset;
     }
 
     mapping(uint16 => Subscription) public subscriptionByAsset;
     mapping(uint16 => mapping(address => Subscription)) public subscriptionByUser;
 
+    event ChangeCapacityOffset(address indexed who_, uint16 indexed assetIndex_, uint256 capacityOffset_);
+    event ChangeTokenPrice(address indexed who_, uint16 indexed assetIndex_, uint256 tokenPrice_);
+    event UpdateAsset(uint16 indexed assetIndex_);
+    event UpdateUser(address indexed who_, uint16 indexed assetIndex_);
     event DepositBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event DepositAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
-    event RefundBase(address indexed who_, uint16 indexed assetIndex_, uint256 premiumAmount_);
-    event RefundAsset(address indexed who_, uint16 indexed assetIndex_, uint256 premiumAmount_);
-    event DeductBase(address indexed who_, uint16 indexed assetIndex_, uint256 coveredAmount_, uint256 premiumAmount_);
-    event DeductAsset(address indexed who_, uint16 indexed assetIndex_, uint256 coveredAmount_, uint256 premiumAmount_);
     event WithdrawBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event WithdrawAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event SubscribeBase(address indexed who_, uint16 indexed assetIndex_, uint256 amoun_);
@@ -133,7 +129,10 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     ) external {
         require(_msgSender() == assetInfoMap[assetIndex_].recipient, 
                 "Only recipient can change");
+
         assetInfoMap[assetIndex_].futureCapacityOffset = capacityOffset_;
+
+        emit ChangeCapacityOffset(_msgSender(), assetIndex_, capacityOffset_);
     }
 
     function changeTokenPrice(
@@ -141,6 +140,8 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         uint256 tokenPrice_
     ) external onlyUpdater {
         assetInfoMap[assetIndex_].futureTokenPrice = tokenPrice_;
+
+        emit ChangeTokenPrice(_msgSender(), assetIndex_, tokenPrice_);
     }
 
     function getCurrentWeek() public view returns(uint256) {
@@ -166,24 +167,56 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
         uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
 
-        uint256 actualSubscription = assetInfo.capacityOffset.add(
-            assetInfo.subscriptionBase).add(
-                assetInfo.subscriptionAsset.mul(assetInfo.tokenPrice).div(PRICE_BASE));
+        Subscription storage subscription = subscriptionByAsset[assetIndex_];
 
-        if (actualSubscription > sellerAssetBalance) {
-            assetInfo.refundRatio = actualSubscription.sub(sellerAssetBalance).mul(REFUND_BASE).div(actualSubscription);
+        uint256 actualSubscription = subscription.futureBase.add(
+            subscription.futureAsset.mul(assetInfo.tokenPrice).div(PRICE_BASE));
+
+        if (sellerAssetBalance <= assetInfo.capacityOffset) {
+            subscription.futureBase = 0;
+            subscription.futureAsset = 0;
+            assetInfo.subscriptionRatio = 0;
+        } else if (actualSubscription > sellerAssetBalance.sub(assetInfo.capacityOffset)) {
+            subscription.futureBase = subscription.futureBase.mul(
+                sellerAssetBalance.sub(assetInfo.capacityOffset)).div(actualSubscription);
+            subscription.futureAsset = subscription.futureAsset.mul(sellerAssetBalance).div(actualSubscription);
+
+            assetInfo.subscriptionRatio = sellerAssetBalance.mul(RATIO_BASE).div(actualSubscription);
         } else {
-            assetInfo.refundRatio = 0;
+            assetInfo.subscriptionRatio = RATIO_BASE;
         }
 
-        assetInfo.subscriptionBase = 0;
-        assetInfo.subscriptionAsset = 0;
-
         assetInfoMap[assetIndex_].weekUpdated = currentWeek;  // This week.
+
+        emit UpdateAsset(assetIndex_);
+    }
+
+    function _getPremiumBase(uint16 assetIndex_, address who_) private view returns(uint256) {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        Subscription storage subscription = subscriptionByUser[assetIndex_][who_];
+
+        return subscription.futureBase.mul(
+            getPremiumRate(assetIndex_, who_)).div(
+                registry.PREMIUM_BASE()).mul(
+                    assetInfo.subscriptionRatio) / RATIO_BASE;
+        // HACK: '/' instead of .div to prevent "Stack too deep" error.
+    }
+
+    function _getPremiumAsset(uint16 assetIndex_, address who_) private view returns(uint256) {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        Subscription storage subscription = subscriptionByUser[assetIndex_][who_];
+
+        return subscription.futureAsset.mul(
+            getPremiumRate(assetIndex_, who_)).div(
+                registry.PREMIUM_BASE()).mul(
+                    PRICE_BASE).div(
+                        assetInfo.tokenPrice).mul(
+                            assetInfo.subscriptionRatio) / RATIO_BASE;
+        // HACK: '/' instead of .div to prevent "Stack too deep" error.
     }
 
     // Step 2.
-    function updateUser(uint16 assetIndex_, address who_) external lock onlyUpdater {
+    function updateUser(address who_, uint16 assetIndex_) external lock onlyUpdater {
         require(who_ != address(0), "who_ is zero");
 
         uint256 currentWeek = getCurrentWeek();
@@ -196,57 +229,44 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         require(assetInfo.weekUpdated == currentWeek, "updateAsset first");
         require(userInfo.weekUpdated < currentWeek, "Already called");
 
-        // Maybe refund to user.
-        // NOTE: We pay recipient for the last week's premium at this week after refunding.
-        if (assetInfo.refundRatio > 0) {
-            uint256 refundBase = userInfo.premiumBase.mul(assetInfo.refundRatio).div(REFUND_BASE);
-            userInfo.balanceBase = userInfo.balanceBase.add(refundBase);
-            IERC20(registry.baseToken()).safeTransfer(assetInfo.recipient, userInfo.premiumBase.sub(refundBase));
-            emit RefundBase(who_, assetIndex_, refundBase);
-
-            if (assetInfo.token != address(0)) {
-                uint256 refundAsset = userInfo.premiumAsset.mul(assetInfo.refundRatio).div(REFUND_BASE);
-                userInfo.balanceAsset = userInfo.balanceAsset.add(refundAsset);
-                IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, userInfo.premiumAsset.sub(refundAsset));
-                emit RefundAsset(who_, assetIndex_, refundAsset);
-            }
-        }
-
         // Maybe deduct premium as base.
-        uint256 premiumBase = subscription.futureBase.mul(
-                getPremiumRate(assetIndex_, who_)).div(registry.PREMIUM_BASE());
+        uint256 premiumBase = _getPremiumBase(assetIndex_, who_);
+
         if (userInfo.balanceBase >= premiumBase) {
             userInfo.balanceBase = userInfo.balanceBase.sub(premiumBase);
             userInfo.premiumBase = premiumBase;
-            subscription.currentBase = subscription.futureBase;
-            assetInfo.subscriptionBase = assetInfo.subscriptionBase.add(subscription.currentBase);
 
-            emit DeductBase(who_, assetIndex_, subscription.currentBase, premiumBase);
+            subscription.futureBase = subscription.futureBase.mul(
+                assetInfo.subscriptionRatio).div(RATIO_BASE);
+
+            IERC20(registry.baseToken()).safeTransfer(assetInfo.recipient, premiumBase);
         } else {
             userInfo.premiumBase = 0;
-            subscription.currentBase = 0;
             subscription.futureBase = 0;
         }
 
         // Maybe deduct premium as asset.
         if (assetInfo.token != address(0)) {
-            uint256 premiumAsset = subscription.futureAsset.mul(
-                getPremiumRate(assetIndex_, who_)).div(registry.PREMIUM_BASE()).mul(PRICE_BASE).div(assetInfo.tokenPrice);
+            require(assetInfo.tokenPrice > 0, "Price is zero");
+
+            uint256 premiumAsset = _getPremiumAsset(assetIndex_, who_);
             if (userInfo.balanceAsset >= premiumAsset) {
                 userInfo.balanceAsset = userInfo.balanceAsset.sub(premiumAsset);
                 userInfo.premiumAsset = premiumAsset;
-                subscription.currentAsset = subscription.futureAsset;
-                assetInfo.subscriptionAsset = assetInfo.subscriptionAsset.add(subscription.currentAsset);
 
-                emit DeductAsset(who_, assetIndex_, subscription.currentAsset, premiumAsset);
+                subscription.futureAsset = subscription.futureAsset.mul(
+                    assetInfo.subscriptionRatio).div(RATIO_BASE);
+
+                IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, premiumAsset);
             } else {
                 userInfo.premiumAsset = 0;
-                subscription.currentAsset = 0;
                 subscription.futureAsset = 0;
             }
         }
 
         userInfo.weekUpdated = currentWeek;  // This week.
+
+        emit UpdateUser(who_, assetIndex_);
     }
 
     function depositBase(uint16 assetIndex_, uint256 amount_) external lock {
@@ -255,6 +275,8 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
         require(amount_ > 0, "amount_ is zero");
         require(assetInfo.recipient != address(0), "Recipient is zero");
+        require(userInfo.weekUpdated == getCurrentWeek() || userInfo.weekUpdated == 0,
+                "User not updated yet");
 
         IERC20(registry.baseToken()).safeTransferFrom(_msgSender(), address(this), amount_);
         userInfo.balanceBase = userInfo.balanceBase.add(amount_);

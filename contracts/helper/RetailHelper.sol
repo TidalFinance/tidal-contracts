@@ -69,6 +69,8 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     mapping(uint16 => AssetInfo) public assetInfoMap;
 
     struct Subscription {
+        uint256 currentBase;
+        uint256 currentAsset;
         uint256 futureBase;
         uint256 futureAsset;
     }
@@ -152,6 +154,16 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         IRetailPremiumCalculator(retailPremiumCalculator).getPremiumRate(assetIndex_, who_);
     }
 
+    function getEffectiveCapacity(uint16 assetIndex_) public view returns(uint256) {
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
+        if (sellerAssetBalance <= assetInfo.capacityOffset) {
+            return 0;
+        } else {
+            return sellerAssetBalance.sub(assetInfo.capacityOffset);
+        }
+    }
+
     // Step 1.
     function updateAsset(uint16 assetIndex_) external lock onlyUpdater {
         uint256 currentWeek = getCurrentWeek();
@@ -165,26 +177,26 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
         assetInfo.capacityOffset = assetInfo.futureCapacityOffset;
         assetInfo.tokenPrice = assetInfo.futureTokenPrice;
 
-        uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
-
         Subscription storage subscription = subscriptionByAsset[assetIndex_];
 
         uint256 actualSubscription = subscription.futureBase.add(
             subscription.futureAsset.mul(assetInfo.tokenPrice).div(PRICE_BASE));
 
-        if (sellerAssetBalance <= assetInfo.capacityOffset) {
-            subscription.futureBase = 0;
-            subscription.futureAsset = 0;
-            assetInfo.subscriptionRatio = 0;
-        } else if (actualSubscription > sellerAssetBalance.sub(assetInfo.capacityOffset)) {
-            subscription.futureBase = subscription.futureBase.mul(
-                sellerAssetBalance.sub(assetInfo.capacityOffset)).div(actualSubscription);
-            subscription.futureAsset = subscription.futureAsset.mul(sellerAssetBalance).div(actualSubscription);
+        uint256 effectiveCapacity = getEffectiveCapacity(assetIndex_);
 
-            assetInfo.subscriptionRatio = sellerAssetBalance.mul(RATIO_BASE).div(actualSubscription);
+        if (actualSubscription > effectiveCapacity) {
+            subscription.futureBase = subscription.futureBase.mul(
+                effectiveCapacity).div(actualSubscription);
+            subscription.futureAsset = subscription.futureAsset.mul(
+                effectiveCapacity).div(actualSubscription);
+
+            assetInfo.subscriptionRatio = effectiveCapacity.mul(RATIO_BASE).div(actualSubscription);
         } else {
             assetInfo.subscriptionRatio = RATIO_BASE;
         }
+
+        subscription.currentBase = subscription.futureBase;
+        subscription.currentAsset = subscription.futureAsset;
 
         assetInfoMap[assetIndex_].weekUpdated = currentWeek;  // This week.
 

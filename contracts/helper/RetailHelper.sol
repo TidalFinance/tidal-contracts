@@ -151,7 +151,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
     }
 
     function getPremiumRate(uint16 assetIndex_, address who_) public view returns(uint256) {
-        IRetailPremiumCalculator(retailPremiumCalculator).getPremiumRate(assetIndex_, who_);
+        return IRetailPremiumCalculator(retailPremiumCalculator).getPremiumRate(assetIndex_, who_);
     }
 
     function getEffectiveCapacity(uint16 assetIndex_) public view returns(uint256) {
@@ -275,6 +275,9 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
                 subscription.futureAsset = 0;
             }
         }
+
+        subscription.currentBase = subscription.futureBase;
+        subscription.currentAsset = subscription.futureAsset;
 
         userInfo.weekUpdated = currentWeek;  // This week.
 

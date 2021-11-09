@@ -87,10 +87,8 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
     event DepositAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event WithdrawBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event WithdrawAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
-    event SubscribeBase(address indexed who_, uint16 indexed assetIndex_, uint256 amoun_);
-    event SubscribeAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
-    event UnsubscribeBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
-    event UnsubscribeAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
+    event AdjustSubscriptionBase(address indexed who_, uint16 indexed assetIndex_, uint256 amoun_);
+    event AdjustSubscriptionAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
 
     constructor (IRegistry registry_) public {
         registry = registry_;
@@ -369,49 +367,30 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
         emit WithdrawAsset(_msgSender(), assetIndex_, amount_);
     }
 
-    function subscribeBase(uint16 assetIndex_, uint256 amount_) external {
+    function adjustSubscriptionBase(uint16 assetIndex_, uint256 amount_) external {
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
 
-        require(amount_ > 0, "amount_ is zero");
         require(assetInfo.recipient != address(0), "Recipient is zero");
 
-        subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.add(amount_);
-        subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.add(amount_);
-        emit SubscribeBase(_msgSender(), assetIndex_, amount_);
+        subscriptionByAsset[assetIndex_].futureBase =
+            subscriptionByAsset[assetIndex_].futureBase.add(
+                amount_).sub(
+                    subscriptionByUser[assetIndex_][_msgSender()].futureBase);
+        subscriptionByUser[assetIndex_][_msgSender()].futureBase = amount_;
+        emit AdjustSubscriptionBase(_msgSender(), assetIndex_, amount_);
     }
 
-    function unsubscribeBase(uint16 assetIndex_, uint256 amount_) external {
+    function adjustSubscriptionAsset(uint16 assetIndex_, uint256 amount_) external {
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
 
-        require(amount_ > 0, "amount_ is zero");
-        require(assetInfo.recipient != address(0), "Recipient is zero");
-
-        subscriptionByAsset[assetIndex_].futureBase = subscriptionByAsset[assetIndex_].futureBase.sub(amount_);
-        subscriptionByUser[assetIndex_][_msgSender()].futureBase = subscriptionByUser[assetIndex_][_msgSender()].futureBase.sub(amount_);
-        emit UnsubscribeBase(_msgSender(), assetIndex_, amount_);
-    }
-
-    function subscribeAsset(uint16 assetIndex_, uint256 amount_) external {
-        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
-
-        require(amount_ > 0, "amount_ is zero");
         require(assetInfo.token != address(0), "token is zero");
         require(assetInfo.recipient != address(0), "Recipient is zero");
 
-        subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.add(amount_);
-        subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.add(amount_);
-        emit SubscribeAsset(_msgSender(), assetIndex_, amount_);
-    }
-
-    function unsubscribeAsset(uint16 assetIndex_, uint256 amount_) external {
-        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
-
-        require(amount_ > 0, "amount_ is zero");
-        require(assetInfo.token != address(0), "token is zero");
-        require(assetInfo.recipient != address(0), "Recipient is zero");
-
-        subscriptionByAsset[assetIndex_].futureAsset = subscriptionByAsset[assetIndex_].futureAsset.sub(amount_);
-        subscriptionByUser[assetIndex_][_msgSender()].futureAsset = subscriptionByUser[assetIndex_][_msgSender()].futureAsset.sub(amount_);
-        emit UnsubscribeAsset(_msgSender(), assetIndex_, amount_);
+        subscriptionByAsset[assetIndex_].futureAsset =
+            subscriptionByAsset[assetIndex_].futureAsset.add(
+                amount_).sub(
+                    subscriptionByUser[assetIndex_][_msgSender()].futureAsset);
+        subscriptionByUser[assetIndex_][_msgSender()].futureAsset = amount_;
+        emit AdjustSubscriptionAsset(_msgSender(), assetIndex_, amount_);
     }
 }

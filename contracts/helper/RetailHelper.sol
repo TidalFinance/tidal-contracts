@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 import "../common/BaseRelayRecipient.sol";
+import "../common/Migratable.sol";
 import "../common/NonReentrancy.sol";
 
 import "../interfaces/IAssetManager.sol";
@@ -17,7 +18,7 @@ interface IRetailPremiumCalculator {
     function getPremiumRate(uint16 assetIndex_, address who_) external view returns(uint256);
 }
 
-contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
+contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable {
 
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -101,6 +102,31 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient {
 
     function _trustedForwarder() internal override view returns(address) {
         return registry.trustedForwarder();
+    }
+
+    function _migrationCaller() internal override view returns(address) {
+        return owner();
+    }
+
+    function migrate(uint16 assetIndex_) external lock {
+        require(address(migrateTo) != address(0), "Destination not set");
+
+        AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
+        UserInfo storage userInfo = userInfoMap[assetIndex_][_msgSender()];
+
+        require(userInfo.balanceBase > 0 || userInfo.balanceAsset > 0, "Empty account");
+
+        if (userInfo.balanceBase > 0) {
+          IERC20(registry.baseToken()).safeTransfer(address(migrateTo), userInfo.balanceBase);
+          migrateTo.onMigration(_msgSender(), userInfo.balanceBase, abi.encodePacked(assetIndex_, true));
+          userInfo.balanceBase = 0;
+        }
+
+        if (userInfo.balanceAsset > 0 && assetInfo.token != address(0)) {
+          IERC20(assetInfo.token).safeTransfer(address(migrateTo), userInfo.balanceAsset);
+          migrateTo.onMigration(_msgSender(), userInfo.balanceAsset, abi.encodePacked(assetIndex_, false));
+          userInfo.balanceAsset = 0;
+        }
     }
 
     function setUpdater(address _who, bool _isUpdater) external onlyOwner {

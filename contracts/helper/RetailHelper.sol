@@ -11,6 +11,7 @@ import "../common/Migratable.sol";
 import "../common/NonReentrancy.sol";
 
 import "../interfaces/IAssetManager.sol";
+import "../interfaces/IBuyer.sol";
 import "../interfaces/IRegistry.sol";
 import "../interfaces/ISeller.sol";
 
@@ -181,10 +182,13 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
     function getEffectiveCapacity(uint16 assetIndex_) public view returns(uint256) {
         AssetInfo storage assetInfo = assetInfoMap[assetIndex_];
         uint256 sellerAssetBalance = ISeller(registry.seller()).assetBalance(assetIndex_);
-        if (sellerAssetBalance <= assetInfo.capacityOffset) {
+        uint256 buyerSubscription = IBuyer(registry.buyer()).currentSubscription(assetIndex_);
+        uint256 allCapacity = sellerAssetBalance < buyerSubscription ? sellerAssetBalance : buyerSubscription;
+
+        if (allCapacity <= assetInfo.capacityOffset) {
             return 0;
         } else {
-            return sellerAssetBalance.sub(assetInfo.capacityOffset);
+            return allCapacity.sub(assetInfo.capacityOffset);
         }
     }
 

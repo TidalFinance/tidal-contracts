@@ -88,7 +88,7 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
     event DepositAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event WithdrawBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event WithdrawAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
-    event AdjustSubscriptionBase(address indexed who_, uint16 indexed assetIndex_, uint256 amoun_);
+    event AdjustSubscriptionBase(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
     event AdjustSubscriptionAsset(address indexed who_, uint16 indexed assetIndex_, uint256 amount_);
 
     constructor (IRegistry registry_) public {
@@ -276,13 +276,13 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
             userInfo.balanceBase = userInfo.balanceBase.sub(premiumBase);
             userInfo.premiumBase = premiumBase;
 
-            subscription.futureBase = subscription.futureBase.mul(
+            subscription.currentBase = subscription.futureBase.mul(
                 assetInfo.subscriptionRatio).div(RATIO_BASE);
 
             IERC20(registry.baseToken()).safeTransfer(assetInfo.recipient, premiumBase);
         } else {
             userInfo.premiumBase = 0;
-            subscription.futureBase = 0;
+            subscription.currentBase = 0;
         }
 
         // Maybe deduct premium as asset.
@@ -294,18 +294,15 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
                 userInfo.balanceAsset = userInfo.balanceAsset.sub(premiumAsset);
                 userInfo.premiumAsset = premiumAsset;
 
-                subscription.futureAsset = subscription.futureAsset.mul(
+                subscription.currentAsset = subscription.futureAsset.mul(
                     assetInfo.subscriptionRatio).div(RATIO_BASE);
 
                 IERC20(assetInfo.token).safeTransfer(assetInfo.recipient, premiumAsset);
             } else {
                 userInfo.premiumAsset = 0;
-                subscription.futureAsset = 0;
+                subscription.currentAsset = 0;
             }
         }
-
-        subscription.currentBase = subscription.futureBase;
-        subscription.currentAsset = subscription.futureAsset;
 
         userInfo.weekUpdated = currentWeek;  // This week.
 

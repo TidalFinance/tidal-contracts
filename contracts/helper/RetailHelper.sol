@@ -208,23 +208,22 @@ contract RetailHelper is Ownable, NonReentrancy, BaseRelayRecipient, Migratable 
         Subscription storage subscription = subscriptionByAsset[assetIndex_];
 
         uint256 actualSubscription = subscription.futureBase.add(
-            subscription.futureAsset.mul(assetInfo.tokenPrice).div(PRICE_BASE));
+            subscription.futureAsset);
 
         uint256 effectiveCapacity = getEffectiveCapacity(assetIndex_);
 
         if (actualSubscription > effectiveCapacity) {
-            subscription.futureBase = subscription.futureBase.mul(
+            subscription.currentBase = subscription.futureBase.mul(
                 effectiveCapacity).div(actualSubscription);
-            subscription.futureAsset = subscription.futureAsset.mul(
+            subscription.currentAsset = subscription.futureAsset.mul(
                 effectiveCapacity).div(actualSubscription);
 
             assetInfo.subscriptionRatio = effectiveCapacity.mul(RATIO_BASE).div(actualSubscription);
         } else {
+            subscription.currentBase = subscription.futureBase;
+            subscription.currentAsset = subscription.futureAsset;
             assetInfo.subscriptionRatio = RATIO_BASE;
         }
-
-        subscription.currentBase = subscription.futureBase;
-        subscription.currentAsset = subscription.futureAsset;
 
         assetInfoMap[assetIndex_].weekUpdated = currentWeek;  // This week.
 
